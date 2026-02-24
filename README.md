@@ -27,11 +27,14 @@ Phoebe does one thing well: be a fast, reliable AI agent on Telegram. No plugin 
 - **Agent Skills** — 850+ community skills from [skills.sh](https://skills.sh), installed and managed by the bot itself
 - **Tool-call history** — full `ModelMessage` objects stored with tool-call + tool-result parts, exactly as they happened
 - **Smart windowing** — last 100 messages sent to model, last 30 keep full tool results, older are truncated to 10K chars
-- **Persistent memory** — conversations, user profiles, model preferences survive restarts — messages never deleted from disk
+- **Persistent memory** — user profiles and model preferences survive restarts. Conversation history is stored locally per session (cloud backup & restore is on the roadmap)
+- **Per-request logging** — every API call is logged via the [Mume AI](https://mume.ai) dashboard for usage tracking and billing transparency
 - **Real-time streaming** — AI SDK v6 `streamText` with live edits to Telegram
 - **Tool transparency** — shows what the bot is doing ("Running command...", "Activating skill...")
 - **Per-user identity** — remembers names across conversations
 - **Owner controls** — `/restart` to reboot the Pi, allowlist for access control
+- **Proactive notifications** — Phoebe can initiate messages to the owner, not just respond
+- **Social presence** — built-in Moltbook integration, Phoebe can post and engage with the AI agent community
 
 ## Quick Start
 
@@ -172,7 +175,7 @@ These are stored in exact order in the conversation JSON. On the next turn:
 - Last **100 messages** are sent as context
 - Last **30 messages** keep full tool results
 - Older tool results are truncated to **10,000 chars**
-- Messages are **never deleted** from disk (capped at 500)
+- Messages are stored locally per session (capped at 500). Cloud backup & restore planned for hardware-failure resilience
 
 ## Agent Skills
 
@@ -198,9 +201,10 @@ Skills are on-demand — the model only loads a skill's instructions when it cal
 - [ ] **Scheduled tasks** — "remind me" / cron-style recurring actions
 - [ ] **Skill auto-update** — periodic `npx skills check && npx skills update`
 - [ ] **Dashboard** — web UI for monitoring conversations, tool usage, and costs
-- [ ] **Multi-bot** — run multiple Phoebe instances with different personalities
+- [ ] **Child bots** — spin up specialised bots that inherit Phoebe's core — each with their own focus, Phoebe remains the mother bot
 - [ ] **Plugin API** — custom tool packages beyond the built-in 7
 - [ ] **RAG** — index local files for retrieval-augmented generation
+- [ ] **Cloud conversation backup** — sync conversation history to cloud so it can be accessed and restored even if the hardware fails or is replaced
 
 ## Tech Stack
 
@@ -210,7 +214,7 @@ Skills are on-demand — the model only loads a skill's instructions when it cal
 - **Telegram**: [grammY](https://grammy.dev) v1.40
 - **Gateway**: [Mume AI](https://mume.ai) (OpenRouter-compatible)
 - **Process Manager**: PM2
-- **Hardware**: Raspberry Pi 4 (tested on 1GB RAM)
+- **Hardware**: Raspberry Pi 3/4/5 (tested on Pi 3 Model B with 906MB RAM — runs great!)
 
 ## License
 
