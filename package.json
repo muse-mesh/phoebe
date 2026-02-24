@@ -1,0 +1,25 @@
+{
+  "name": "phoebe",
+  "version": "2.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.30.1",
+  "description": "Phoebe — AI Telegram bot with full bash access, powered by Mume gateway",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx --watch src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^2.2.3",
+    "ai": "^6.0.49",
+    "dotenv": "^17.3.1",
+    "grammy": "^1.35.0",
+    "tsx": "^4.19.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}
