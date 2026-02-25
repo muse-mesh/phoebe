@@ -193,6 +193,7 @@ Phoebe: [uses activate_skill → reads SKILL.md → follows instructions using b
 Skills are on-demand — the model only loads a skill's instructions when it calls `activate_skill`. The 850+ installed skills are just directory names until activated.
 
 ## Roadmap
+- [ ] **Voice mode** — give Phoebe a voice to talk naturally instead of just text
 
 - [ ] **Multi-user conversations** — group chat support with per-user context
 - [ ] **Image & document understanding** — vision model support for photos/PDFs sent to the bot
