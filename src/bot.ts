@@ -448,29 +448,28 @@ async function handleAIMessage(
         ? fullText.slice(sentTextLength).trim()
         : fullText.trim();
 
-    // Voice reply: convert text to speech if the user sent a voice message
+    // Always send the text reply so the user can read it
+    await sendChunked(ctx, remainingText);
+
+    // Voice reply: also send audio if the user sent a voice message
     if (options?.replyWithVoice && remainingText) {
       const voice = getChatVoice(ctx.chat!.id);
       const audioBuffer = await textToSpeech(remainingText, voice);
       if (audioBuffer) {
         try {
           await ctx.replyWithVoice(new InputFile(audioBuffer, "reply.ogg"));
-          return;
         } catch {
           try {
             await ctx.replyWithAudio(new InputFile(audioBuffer, "phoebe.mp3"));
-            return;
           } catch (e) {
             console.error(
-              "[tts] send failed, falling back to text:",
+              "[tts] send failed:",
               (e as Error).message,
             );
           }
         }
       }
     }
-
-    await sendChunked(ctx, remainingText);
   } catch (err) {
     console.error("[bot] error:", err);
     await ctx.reply(formatError(err)).catch(() => {});

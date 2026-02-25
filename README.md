@@ -23,13 +23,15 @@ Phoebe does one thing well: be a fast, reliable AI agent on Telegram. No plugin 
 ## Features
 
 - **26+ models** — Claude, GPT, Gemini, Grok, DeepSeek, Mistral, Kimi — switchable per-chat with `/model`
+- **Voice messages** — speech-to-text (ElevenLabs Scribe V2) + text-to-speech (ElevenLabs Turbo v2.5). Send a voice message, get back both text and audio. 21 voices to choose from with `/voice`
 - **7 built-in tools** — bash, readFile, writeFile, list_skills, activate_skill, search_skills, install_skill
 - **Agent Skills** — 850+ community skills from [skills.sh](https://skills.sh), installed and managed by the bot itself
 - **Tool-call history** — full `ModelMessage` objects stored with tool-call + tool-result parts, exactly as they happened
 - **Smart windowing** — last 100 messages sent to model, last 30 keep full tool results, older are truncated to 10K chars
-- **Persistent memory** — user profiles and model preferences survive restarts. Conversation history is stored locally per session (cloud backup & restore is on the roadmap)
+- **Persistent memory** — user profiles, model preferences, and voice preferences survive restarts. Conversation history is stored locally per session (cloud backup & restore is on the roadmap)
 - **Per-request logging** — every API call is logged via the [Mume AI](https://mume.ai) dashboard for usage tracking and billing transparency
 - **Real-time streaming** — AI SDK v6 `streamText` with live edits to Telegram
+- **Image & document understanding** — send photos or documents, Phoebe processes them with vision-capable models
 - **Tool transparency** — shows what the bot is doing ("Running command...", "Activating skill...")
 - **Per-user identity** — remembers names across conversations
 - **Owner controls** — `/restart` to reboot the Pi, allowlist for access control
@@ -57,6 +59,7 @@ MAX_STEPS=15
 OWNER_ID=             # Your Telegram user ID
 ALLOWED_IDS=          # Comma-separated IDs (empty = everyone)
 SKILLS_DIR=           # Path to skills directory (default: ../skills)
+FAL_KEY=              # fal.ai API key (for ElevenLabs STT/TTS)
 ```
 
 ## Deploy to Raspberry Pi
@@ -95,9 +98,11 @@ phoebe/
 └── src/
     ├── index.ts          # Entry — loads env, starts bot
     ├── config.ts         # Env config, 26-model catalog
-    ├── persistence.ts    # ModelMessage storage, windowing, truncation
+    ├── persistence.ts    # ModelMessage storage, windowing, voices, truncation
     ├── bot.ts            # grammY bot, commands, AI streaming handler
     ├── tools.ts          # 7 built-in tools + Agent Skills registry
+    ├── stt.ts            # Speech-to-text (ElevenLabs Scribe V2 via fal.ai)
+    ├── tts.ts            # Text-to-speech (ElevenLabs Turbo v2.5 via fal.ai)
     └── errors.ts         # Error → friendly message formatter
 ```
 
@@ -107,6 +112,7 @@ phoebe/
 data/
 ├── users.json            # User profiles
 ├── models.json           # Per-chat model overrides
+├── voices.json           # Per-chat voice preferences
 └── conversations/        # Full conversation history per chat
     └── <chatId>.json     # Array of ModelMessage objects
 ```
@@ -121,6 +127,7 @@ data/
 | `/skills`        | List installed Agent Skills          |
 | `/models`        | Browse all 26 models                 |
 | `/model <alias>` | Switch model (e.g., `/model sonnet`) |
+| `/voice`         | Browse / switch TTS voice (21 voices) |
 | `/clear`         | Clear conversation history           |
 | `/restart`       | Reboot the Pi (owner only)           |
 
@@ -161,6 +168,8 @@ Telegram ←→ grammY (long-polling)
     Tool results → back to model
                 │
        Final text streamed to Telegram
+                │
+       (if voice message → TTS via ElevenLabs → audio reply)
 ```
 
 ### How Tool-Call History Works
@@ -193,11 +202,9 @@ Phoebe: [uses activate_skill → reads SKILL.md → follows instructions using b
 Skills are on-demand — the model only loads a skill's instructions when it calls `activate_skill`. The 850+ installed skills are just directory names until activated.
 
 ## Roadmap
-- [ ] **Voice mode** — give Phoebe a voice to talk naturally instead of just text
-
+- [x] **Voice mode** — STT (ElevenLabs Scribe V2) + TTS (ElevenLabs Turbo v2.5), 21 selectable voices, replies with both text and audio
+- [x] **Image & document understanding** — vision model support for photos/PDFs sent to the bot
 - [ ] **Multi-user conversations** — group chat support with per-user context
-- [ ] **Image & document understanding** — vision model support for photos/PDFs sent to the bot
-- [ ] **Voice messages** — speech-to-text input, text-to-speech responses
 - [ ] **Web search tool** — built-in web search without needing a skill
 - [ ] **Scheduled tasks** — "remind me" / cron-style recurring actions
 - [ ] **Skill auto-update** — periodic `npx skills check && npx skills update`
