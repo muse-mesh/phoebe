@@ -15,7 +15,9 @@ export interface Model {
 
 // ── Environment ──────────────────────────────────────────────────────────────
 
-export const DATA_DIR = path.resolve(__dirname, "..", "data");
+export const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.resolve(__dirname, "..", "data");
 
 export const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
 export const MUME_API_KEY = process.env.MUME_API_KEY ?? "";

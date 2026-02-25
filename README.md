@@ -59,6 +59,7 @@ MAX_STEPS=15
 OWNER_ID=             # Your Telegram user ID
 ALLOWED_IDS=          # Comma-separated IDs (empty = everyone)
 SKILLS_DIR=           # Path to skills directory (default: ../skills)
+DATA_DIR=             # Path to data directory (default: ../data) — move outside app for persistence
 FAL_KEY=              # fal.ai API key (for ElevenLabs STT/TTS)
 ```
 
@@ -212,7 +213,7 @@ Skills are on-demand — the model only loads a skill's instructions when it cal
 - [ ] **Child bots** — spin up specialised bots that inherit Phoebe's core — each with their own focus, Phoebe remains the mother bot
 - [ ] **Plugin API** — custom tool packages beyond the built-in 7
 - [ ] **RAG** — index local files for retrieval-augmented generation
-- [ ] **Cloud conversation backup** — sync conversation history to cloud so it can be accessed and restored even if the hardware fails or is replaced
+- [x] **Cloud conversation backup** — data directory is now configurable via DATA_DIR env var; move outside the app folder for persistence across reinstalls
 
 ## Tech Stack
 
