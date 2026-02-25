@@ -23,6 +23,7 @@ import {
   ensureDataDir,
   loadUserProfiles,
   loadChatModels,
+  loadChatVoices,
   persistAll,
 } from "./persistence.js";
 import { discoverSkills } from "./tools";
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   await ensureDataDir();
   await loadUserProfiles();
   await loadChatModels();
+  await loadChatVoices();
 
   // Discover skills
   console.log("[phoebe] discovering skills...");

@@ -21,6 +21,7 @@ export const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
 export const MUME_API_KEY = process.env.MUME_API_KEY ?? "";
 export const MUME_BASE_URL =
   process.env.MUME_BASE_URL ?? "https://mume.ai/api/v1";
+export const FAL_API_KEY = process.env.FAL_KEY ?? "";
 export const DEFAULT_MODEL =
   process.env.AI_MODEL ?? "google/gemini-3-flash-preview";
 export const MAX_STEPS = 25;

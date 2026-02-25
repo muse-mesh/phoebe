@@ -1,10 +1,14 @@
 // ── Bot ──────────────────────────────────────────────────────────────────────
 
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
+import type { Context } from "grammy";
 import { streamText, stepCountIs } from "ai";
+import type { UserContent } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import fs from "fs/promises";
 import { exec } from "child_process";
+import { speechToText } from "./stt.js";
+import { textToSpeech } from "./tts.js";
 
 import {
   BOT_TOKEN,
@@ -24,6 +28,11 @@ import {
   resolveModelId,
   chatModels,
   saveChatModels,
+  getChatVoice,
+  resolveVoice,
+  chatVoices,
+  saveChatVoices,
+  TTS_VOICES,
   conversations,
   convPath,
   getContextMessages,
@@ -69,6 +78,19 @@ async function sendChunked(
       console.error("[bot] send error:", (e as Error).message);
     });
   }
+}
+
+// ── Telegram File Download ───────────────────────────────────────────────────
+
+async function downloadTelegramFile(
+  ctx: Context,
+  fileId: string,
+): Promise<Buffer> {
+  const file = await ctx.api.getFile(fileId);
+  const url = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
 }
 
 // ── Tools ────────────────────────────────────────────────────────────────────
@@ -128,6 +150,7 @@ bot.command("start", (ctx) =>
       "/skills - List skills\n" +
       "/models - Available models\n" +
       "/model - Switch model\n" +
+      "/voice - Switch TTS voice\n" +
       "/clear - Clear history\n" +
       "/restart - Restart Pi",
   ),
@@ -197,6 +220,29 @@ bot.command("model", async (ctx) => {
   return ctx.reply(`Model: ${modelId}`);
 });
 
+bot.command("voice", async (ctx) => {
+  const arg = ctx.message!.text.replace(/^\/voice(@\w+)?\s*/, "").trim();
+  if (!arg) {
+    const current = getChatVoice(ctx.chat.id);
+    const lines = TTS_VOICES.map(
+      (v) => `- ${v}${v === current ? " \u2713" : ""}`,
+    );
+    return ctx.reply(
+      `Voice: ${current}\n\n${lines.join("\n")}\n\n/voice <name>`,
+    );
+  }
+  const voice = resolveVoice(arg);
+  if (!voice) {
+    return ctx.reply(
+      `Unknown voice "${arg}".\n\n/voice to see available voices.`,
+    );
+  }
+  chatVoices.set(ctx.chat.id, voice);
+  await saveChatVoices().catch(() => {});
+  console.log(`[voice] chat ${ctx.chat.id} -> ${voice}`);
+  return ctx.reply(`Voice: ${voice}`);
+});
+
 bot.command("clear", async (ctx) => {
   conversations.delete(ctx.chat.id);
   await fs.unlink(convPath(ctx.chat.id)).catch(() => {});
@@ -218,15 +264,18 @@ bot.command("restart", async (ctx) => {
   }
 });
 
-// ── Message Handler ──────────────────────────────────────────────────────────
+// ── Core AI Handler ──────────────────────────────────────────────────────────
 
-bot.on("message:text", async (ctx) => {
-  const text = ctx.message.text;
-  const userName = getUserName(ctx.from);
+async function handleAIMessage(
+  ctx: Context,
+  userContent: UserContent,
+  options?: { replyWithVoice?: boolean },
+) {
+  const userName = getUserName(ctx.from ?? undefined);
 
   try {
     await ctx.replyWithChatAction("typing");
-    await addUserMessage(ctx.chat.id, text);
+    await addUserMessage(ctx.chat!.id, userContent);
 
     const typingInterval = setInterval(() => {
       ctx.replyWithChatAction("typing").catch(() => {});
@@ -250,13 +299,13 @@ bot.on("message:text", async (ctx) => {
       abortController.abort();
     }, STREAM_TIMEOUT_MS);
 
-    const currentModel = getChatModel(ctx.chat.id);
+    const currentModel = getChatModel(ctx.chat!.id);
     let result;
     try {
       result = streamText({
         model: provider(currentModel),
         system: systemPrompt,
-        messages: await getContextMessages(ctx.chat.id),
+        messages: await getContextMessages(ctx.chat!.id),
         tools,
         abortSignal: abortController.signal,
         stopWhen: stepCountIs(MAX_STEPS),
@@ -339,7 +388,7 @@ bot.on("message:text", async (ctx) => {
       try {
         const resp = await result.response;
         if (resp.messages.length > 0) {
-          await appendResponseMessages(ctx.chat.id, resp.messages);
+          await appendResponseMessages(ctx.chat!.id, resp.messages);
         }
       } catch {
         /* response may not be available on abort */
@@ -347,7 +396,7 @@ bot.on("message:text", async (ctx) => {
 
       const partial = fullText.trim();
       if (partial) await sendChunked(ctx, partial);
-      await addAssistantMessage(ctx.chat.id, "(timed out - task incomplete)");
+      await addAssistantMessage(ctx.chat!.id, "(timed out - task incomplete)");
       await ctx.reply(
         "Request timed out. Try a simpler request, or /clear to reset.",
       );
@@ -358,7 +407,7 @@ bot.on("message:text", async (ctx) => {
     try {
       const resp = await result.response;
       if (resp.messages.length > 0) {
-        await appendResponseMessages(ctx.chat.id, resp.messages);
+        await appendResponseMessages(ctx.chat!.id, resp.messages);
       }
     } catch (err) {
       console.error("[bot] failed to save response messages:", err);
@@ -398,10 +447,168 @@ bot.on("message:text", async (ctx) => {
       sentTextLength > 0
         ? fullText.slice(sentTextLength).trim()
         : fullText.trim();
+
+    // Voice reply: convert text to speech if the user sent a voice message
+    if (options?.replyWithVoice && remainingText) {
+      const voice = getChatVoice(ctx.chat!.id);
+      const audioBuffer = await textToSpeech(remainingText, voice);
+      if (audioBuffer) {
+        try {
+          await ctx.replyWithVoice(new InputFile(audioBuffer, "reply.ogg"));
+          return;
+        } catch {
+          try {
+            await ctx.replyWithAudio(new InputFile(audioBuffer, "phoebe.mp3"));
+            return;
+          } catch (e) {
+            console.error(
+              "[tts] send failed, falling back to text:",
+              (e as Error).message,
+            );
+          }
+        }
+      }
+    }
+
     await sendChunked(ctx, remainingText);
   } catch (err) {
     console.error("[bot] error:", err);
     await ctx.reply(formatError(err)).catch(() => {});
+  }
+}
+
+// ── Message Handlers ─────────────────────────────────────────────────────────
+
+// Text messages
+bot.on("message:text", (ctx) => handleAIMessage(ctx, ctx.message.text));
+
+// Photos — send largest resolution to the model as an image part
+bot.on("message:photo", async (ctx) => {
+  try {
+    const sizes = ctx.message.photo;
+    const largest = sizes[sizes.length - 1];
+    const caption = ctx.message.caption ?? "What's in this image?";
+
+    console.log(
+      `[bot] photo from ${ctx.from?.id}: ${largest.width}x${largest.height} (${largest.file_size ?? "?"}B) caption="${caption.slice(0, 80)}"`,
+    );
+
+    const buffer = await downloadTelegramFile(ctx, largest.file_id);
+    console.log(`[bot] downloaded photo: ${buffer.length} bytes`);
+
+    const content: UserContent = [
+      { type: "text", text: caption },
+      { type: "image", image: buffer, mediaType: "image/jpeg" },
+    ];
+    await handleAIMessage(ctx, content);
+  } catch (err) {
+    console.error("[bot] photo error:", err);
+    await ctx.reply("Failed to process image. Try again.").catch(() => {});
+  }
+});
+
+// Documents — PDFs, text files, images sent as files
+bot.on("message:document", async (ctx) => {
+  try {
+    const doc = ctx.message.document;
+    const caption =
+      ctx.message.caption ??
+      `Analyze this file: ${doc.file_name ?? "document"}`;
+    const mime = doc.mime_type ?? "application/octet-stream";
+    const name = doc.file_name ?? "document";
+    const size = doc.file_size ?? 0;
+
+    // Reject files over 10MB (Telegram's limit is 20MB but let's be safe)
+    if (size > 10 * 1024 * 1024) {
+      await ctx.reply("File too large (max 10MB). Try a smaller file.");
+      return;
+    }
+
+    console.log(
+      `[bot] document from ${ctx.from?.id}: ${name} (${mime}, ${size}B)`,
+    );
+
+    const buffer = await downloadTelegramFile(ctx, doc.file_id);
+    console.log(`[bot] downloaded document: ${buffer.length} bytes`);
+
+    // Images sent as documents
+    if (mime.startsWith("image/")) {
+      const content: UserContent = [
+        { type: "text", text: caption },
+        { type: "image", image: buffer, mediaType: mime },
+      ];
+      await handleAIMessage(ctx, content);
+      return;
+    }
+
+    // Text-based files — read as text and embed inline
+    if (
+      mime.startsWith("text/") ||
+      mime === "application/json" ||
+      mime === "application/xml" ||
+      mime === "application/javascript" ||
+      name.match(
+        /\.(ts|js|py|rb|go|rs|c|cpp|h|md|txt|csv|yaml|yml|toml|sh|sql|html|css)$/i,
+      )
+    ) {
+      const text = buffer.toString("utf-8");
+      const truncated =
+        text.length > 50_000
+          ? text.slice(0, 50_000) + "\n...[truncated]"
+          : text;
+      const content: UserContent = `[File: ${name}]\n\`\`\`\n${truncated}\n\`\`\`\n\n${caption}`;
+      await handleAIMessage(ctx, content);
+      return;
+    }
+
+    // Binary files (PDF, etc) — send as FilePart
+    const content: UserContent = [
+      { type: "text", text: caption },
+      { type: "file", data: buffer, mediaType: mime, filename: name },
+    ];
+    await handleAIMessage(ctx, content);
+  } catch (err) {
+    console.error("[bot] document error:", err);
+    await ctx.reply("Failed to process document. Try again.").catch(() => {});
+  }
+});
+
+// Voice messages — speech-to-text, then reply with text-to-speech
+bot.on("message:voice", async (ctx) => {
+  try {
+    const voice = ctx.message.voice;
+    console.log(
+      `[bot] voice from ${ctx.from?.id}: ${voice.duration}s (${voice.mime_type ?? "audio/ogg"}, ${voice.file_size ?? "?"}B)`,
+    );
+
+    await ctx.replyWithChatAction("typing");
+
+    // Get the Telegram file URL (pass directly to fal.ai — no re-encoding)
+    const file = await ctx.api.getFile(voice.file_id);
+    const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
+    console.log(`[bot] voice file URL ready (${voice.file_size ?? "?"}B)`);
+
+    // Speech-to-text
+    const { text: transcript, language } = await speechToText(fileUrl);
+
+    if (!transcript) {
+      await ctx.reply("I couldn't understand that voice message. Try again?");
+      return;
+    }
+
+    console.log(
+      `[bot] STT (${language ?? "?"}): "${transcript.slice(0, 100)}${transcript.length > 100 ? "..." : ""}"`,
+    );
+
+    // Send transcript to model (always text — more token-efficient than audio)
+    // Append note so the model knows it was a voice message
+    const textForModel = `[Voice message]: ${transcript}`;
+    await handleAIMessage(ctx, textForModel, { replyWithVoice: true });
+  } catch (err) {
+    console.error("[bot] voice error:", err);
+    await ctx
+      .reply("Failed to process voice message. Try again.")
+      .catch(() => {});
   }
 });
 

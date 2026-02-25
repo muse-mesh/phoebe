@@ -6,7 +6,7 @@
 
 import fs from "fs/promises";
 import path from "path";
-import type { ModelMessage, ToolModelMessage } from "ai";
+import type { ModelMessage, ToolModelMessage, UserContent } from "ai";
 import { DATA_DIR, DEFAULT_MODEL, MODELS } from "./config.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -134,6 +134,65 @@ export function resolveModelId(input: string): string {
   return input.trim();
 }
 
+// ── Per-Chat Voice Overrides ─────────────────────────────────────────────────
+
+export const TTS_VOICES = [
+  "Aria",
+  "Roger",
+  "Sarah",
+  "Laura",
+  "Charlie",
+  "George",
+  "Callum",
+  "River",
+  "Liam",
+  "Charlotte",
+  "Alice",
+  "Matilda",
+  "Will",
+  "Jessica",
+  "Eric",
+  "Chris",
+  "Brian",
+  "Daniel",
+  "Lily",
+  "Bill",
+  "Rachel",
+] as const;
+
+export type TTSVoice = (typeof TTS_VOICES)[number];
+
+export const DEFAULT_VOICE: TTSVoice = "Aria";
+
+export const chatVoices = new Map<number, TTSVoice>();
+
+export async function loadChatVoices(): Promise<void> {
+  const data = await loadJSON<Record<string, string>>(
+    path.join(DATA_DIR, "voices.json"),
+  );
+  if (data && typeof data === "object") {
+    for (const [k, v] of Object.entries(data))
+      chatVoices.set(Number(k), v as TTSVoice);
+  }
+  console.log(`[persist] loaded ${chatVoices.size} voice overrides`);
+}
+
+export async function saveChatVoices(): Promise<void> {
+  await saveJSON(
+    path.join(DATA_DIR, "voices.json"),
+    Object.fromEntries(chatVoices),
+  );
+}
+
+export function getChatVoice(chatId: number): TTSVoice {
+  return chatVoices.get(chatId) ?? DEFAULT_VOICE;
+}
+
+export function resolveVoice(input: string): TTSVoice | null {
+  const lower = input.trim().toLowerCase();
+  return TTS_VOICES.find((v) => v.toLowerCase() === lower) ?? null;
+}
+
 // ── Conversation History ─────────────────────────────────────────────────────
 // Messages are stored as native ModelMessage objects (user | assistant | tool).
 // Assistant messages may contain tool-call parts in their content array.
@@ -178,7 +237,23 @@ async function saveConversation(chatId: number): Promise<void> {
     history.length > MAX_DISK_MESSAGES
       ? history.slice(-MAX_DISK_MESSAGES)
       : history;
-  await saveJSON(convPath(chatId), toSave).catch((e: Error) =>
+  // Strip large binary data (images/files) from user messages before persisting
+  const sanitized = toSave.map((msg) => {
+    if (msg.role !== "user" || typeof msg.content === "string") return msg;
+    if (!Array.isArray(msg.content)) return msg;
+    const cleanParts = msg.content.map((part) => {
+      if (part.type === "image") {
+        return { type: "text" as const, text: "[image]" };
+      }
+      if (part.type === "file") {
+        const name = (part as any).filename ?? "file";
+        return { type: "text" as const, text: `[file: ${name}]` };
+      }
+      return part;
+    });
+    return { ...msg, content: cleanParts };
+  });
+  await saveJSON(convPath(chatId), sanitized).catch((e: Error) =>
     console.error(`[persist] save conv ${chatId} failed:`, e.message),
   );
 }
@@ -245,10 +320,10 @@ export async function getContextMessages(
   return recent;
 }
 
-/** Add a single user message. */
+/** Add a single user message (text, or multimodal content array). */
 export async function addUserMessage(
   chatId: number,
-  content: string,
+  content: UserContent,
 ): Promise<void> {
   const history = await loadConversation(chatId);
   history.push({ role: "user", content });
@@ -283,5 +358,6 @@ export async function persistAll(): Promise<void> {
     await saveConversation(chatId).catch(() => {});
   }
   await saveChatModels().catch(() => {});
+  await saveChatVoices().catch(() => {});
   await saveUserProfiles().catch(() => {});
 }
