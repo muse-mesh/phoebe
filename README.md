@@ -2,28 +2,29 @@
 
 > A fast, lightweight AI agent for Telegram — the open-source alternative to OpenClaw.
 
-Phoebe is a self-hosted AI Telegram bot that runs on a Raspberry Pi (or any Linux box). She connects to 26+ language models through the [Mume AI](https://mume.ai) gateway, has full terminal access via built-in tools, and can discover and use 850+ community [Agent Skills](https://agentskills.io). No cloud servers, no monthly bills — just your Pi and an API key.
+Phoebe is a self-hosted AI Telegram bot that runs on a Raspberry Pi (or any Linux box). She connects to all OpenRouter models through the [Mume AI](https://mume.ai) gateway, has full terminal access via built-in tools, and can discover and use 850+ community [Agent Skills](https://agentskills.io). No cloud servers, no monthly bills — just your Pi and an API key.
 
 ## Why Phoebe over OpenClaw?
 
-|                          | **Phoebe**                           | **OpenClaw**              |
-| ------------------------ | ------------------------------------ | ------------------------- |
-| **Startup**              | < 3 seconds                          | 30+ seconds               |
-| **Memory**               | ~130 MB RSS                          | 500+ MB                   |
-| **Tool calls**           | Inline (AI SDK native)               | MCP stdio overhead        |
-| **Conversation history** | Full tool-call replay with windowing | Basic text only           |
-| **Models**               | 26 models, switch per-chat           | Limited selection         |
-| **Streaming**            | Real-time to Telegram                | Partial/delayed           |
-| **Codebase**             | ~1,200 lines TypeScript              | 50K+ lines, complex       |
-| **Dependencies**         | 6 packages                           | 100+ packages             |
-| **Setup**                | `pnpm install && pnpm start`         | Wizard + config + plugins |
+|                          | **Phoebe**                             | **OpenClaw**              |
+| ------------------------ | -------------------------------------- | ------------------------- |
+| **Startup**              | < 3 seconds                            | 30+ seconds               |
+| **Memory**               | ~130 MB RSS                            | 500+ MB                   |
+| **Tool calls**           | Inline (AI SDK native)                 | MCP stdio overhead        |
+| **Conversation history** | Full tool-call replay with windowing   | Basic text only           |
+| **Models**               | All OpenRouter models, switch per-chat | Limited selection         |
+| **Streaming**            | Real-time to Telegram                  | Partial/delayed           |
+| **Codebase**             | ~1,200 lines TypeScript                | 50K+ lines, complex       |
+| **Dependencies**         | 6 packages                             | 100+ packages             |
+| **Setup**                | `pnpm install && pnpm start`           | Wizard + config + plugins |
 
 Phoebe does one thing well: be a fast, reliable AI agent on Telegram. No plugin system to debug, no auto-enable magic, no silent failures.
 
 ## Features
 
-- **26+ models** — Claude, GPT, Gemini, Grok, DeepSeek, Mistral, Kimi — switchable per-chat with `/model`
-- **Voice messages** — speech-to-text (ElevenLabs Scribe V2) + text-to-speech (ElevenLabs Turbo v2.5). Send a voice message, get back both text and audio. 21 voices to choose from with `/voice`
+- **All OpenRouter models** — thousands of models from OpenRouter, cached locally, browseable with `/models`, filterable by name or free tier, paginated with inline keyboard navigation
+- **Model capabilities** — each model's supported features (tools, vision, audio, reasoning, etc.) are tracked from the catalog and shown on switch
+- **Voice messages** — speech-to-text (ElevenLabs Scribe V2) + text-to-speech (ElevenLabs Turbo v2.5). Voice replies are opt-in per chat with `/voicereply`. 21 voices to choose from with `/voice`
 - **7 built-in tools** — bash, readFile, writeFile, list_skills, activate_skill, search_skills, install_skill
 - **Agent Skills** — 850+ community skills from [skills.sh](https://skills.sh), installed and managed by the bot itself
 - **Tool-call history** — full `ModelMessage` objects stored with tool-call + tool-result parts, exactly as they happened
@@ -54,6 +55,7 @@ pnpm start
 BOT_TOKEN=            # Telegram bot token from @BotFather
 MUME_API_KEY=         # API key from mume.ai
 MUME_BASE_URL=https://mume.ai/api/v1
+OPENROUTER_API_KEY=   # OpenRouter API key (for model catalog)
 AI_MODEL=google/gemini-3-flash-preview
 MAX_STEPS=15
 OWNER_ID=             # Your Telegram user ID
@@ -98,13 +100,23 @@ phoebe/
 ├── tsconfig.json
 └── src/
     ├── index.ts          # Entry — loads env, starts bot
-    ├── config.ts         # Env config, 26-model catalog
-    ├── persistence.ts    # ModelMessage storage, windowing, voices, truncation
-    ├── bot.ts            # grammY bot, commands, AI streaming handler
+    ├── config.ts         # Environment variables
+    ├── models.ts         # OpenRouter model catalog (fetch, cache, query)
     ├── tools.ts          # 7 built-in tools + Agent Skills registry
     ├── stt.ts            # Speech-to-text (ElevenLabs Scribe V2 via fal.ai)
     ├── tts.ts            # Text-to-speech (ElevenLabs Turbo v2.5 via fal.ai)
-    └── errors.ts         # Error → friendly message formatter
+    ├── errors.ts         # Error → friendly message formatter
+    ├── bot/
+    │   ├── index.ts      # Bot instance, provider, middleware, helpers
+    │   ├── commands.ts   # All /command handlers + callback queries
+    │   ├── handlers.ts   # AI streaming handler + media handlers
+    │   └── prompt.ts     # System prompt builder
+    └── persistence/
+        ├── index.ts      # Barrel exports + persistAll
+        ├── store.ts      # Low-level JSON read/write helpers
+        ├── users.ts      # User profiles
+        ├── settings.ts   # Chat models, voices, voice-reply toggle
+        └── conversations.ts  # Conversation history + context windowing
 ```
 
 ### Data Directory (auto-created, gitignored)
@@ -114,39 +126,30 @@ data/
 ├── users.json            # User profiles
 ├── models.json           # Per-chat model overrides
 ├── voices.json           # Per-chat voice preferences
+├── voice-reply.json      # Per-chat voice reply toggle
+├── openrouter-models.json # Cached OpenRouter model catalog
 └── conversations/        # Full conversation history per chat
     └── <chatId>.json     # Array of ModelMessage objects
 ```
 
 ## Bot Commands
 
-| Command          | Description                          |
-| ---------------- | ------------------------------------ |
-| `/start`         | Welcome message                      |
-| `/status`        | Uptime, RAM, model, skills count     |
-| `/tools`         | List available tools                 |
-| `/skills`        | List installed Agent Skills          |
-| `/models`        | Browse all 26 models                 |
-| `/model <alias>` | Switch model (e.g., `/model sonnet`) |
-| `/voice`         | Browse / switch TTS voice (21 voices) |
-| `/clear`         | Clear conversation history           |
-| `/restart`       | Reboot the Pi (owner only)           |
-
-### Model Aliases
-
-| Alias      | Model                  |
-| ---------- | ---------------------- |
-| `sonnet`   | Claude Sonnet 4.6      |
-| `opus`     | Claude Opus 4.6        |
-| `haiku`    | Claude Haiku 4.5       |
-| `pro`      | Gemini 3.1 Pro         |
-| `flash`    | Gemini 2.5 Flash       |
-| `gpt5`     | GPT-5.2                |
-| `codex`    | GPT-5.1 Codex Max      |
-| `deepseek` | DeepSeek V3.2          |
-| `grok4`    | Grok 4 Fast            |
-| `mistral`  | Mistral Small Creative |
-| `kimi`     | Kimi K2.5              |
+| Command           | Description                                     |
+| ----------------- | ----------------------------------------------- |
+| `/start`          | Welcome message                                 |
+| `/status`         | Uptime, RAM, model, skills count                |
+| `/tools`          | List available tools                            |
+| `/skills`         | List installed Agent Skills                     |
+| `/models`         | Browse all models (paginated, inline nav)       |
+| `/models free`    | Show only free models                           |
+| `/models <query>` | Search models by name/ID                        |
+| `/model`          | Show current model with capabilities            |
+| `/model <id>`     | Switch model (e.g., `/model claude-sonnet-4.6`) |
+| `/voice`          | Browse / switch TTS voice (21 voices)           |
+| `/voicereply`     | Toggle voice replies on/off (off by default)    |
+| `/refreshmodels`  | Re-fetch model catalog from OpenRouter          |
+| `/clear`          | Clear conversation history                      |
+| `/restart`        | Reboot the Pi (owner only)                      |
 
 ## Architecture
 
@@ -170,7 +173,7 @@ Telegram ←→ grammY (long-polling)
                 │
        Final text streamed to Telegram
                 │
-       (if voice message → TTS via ElevenLabs → audio reply)
+       (if voice message + /voicereply enabled → TTS via ElevenLabs → audio reply)
 ```
 
 ### How Tool-Call History Works
@@ -203,6 +206,7 @@ Phoebe: [uses activate_skill → reads SKILL.md → follows instructions using b
 Skills are on-demand — the model only loads a skill's instructions when it calls `activate_skill`. The 850+ installed skills are just directory names until activated.
 
 ## Roadmap
+
 - [x] **Voice mode** — STT (ElevenLabs Scribe V2) + TTS (ElevenLabs Turbo v2.5), 21 selectable voices, replies with both text and audio
 - [x] **Image & document understanding** — vision model support for photos/PDFs sent to the bot
 - [ ] **Multi-user conversations** — group chat support with per-user context

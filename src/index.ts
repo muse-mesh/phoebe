@@ -15,7 +15,6 @@ import {
   DEFAULT_MODEL,
   MUME_BASE_URL,
   ALLOWED_IDS,
-  MODELS,
   DATA_DIR,
   SKILLS_DIR,
 } from "./config.js";
@@ -24,16 +23,20 @@ import {
   loadUserProfiles,
   loadChatModels,
   loadChatVoices,
+  loadChatVoiceReply,
   persistAll,
-} from "./persistence.js";
-import { discoverSkills } from "./tools";
-import { bot, notifyOwner } from "./bot.js";
+} from "./persistence/index.js";
+import { loadModelCatalog, getCatalogInfo } from "./models.js";
+import { discoverSkills } from "./tools.js";
+import { bot, notifyOwner } from "./bot/index.js";
 
 async function main(): Promise<void> {
   await ensureDataDir();
   await loadUserProfiles();
   await loadChatModels();
   await loadChatVoices();
+  await loadChatVoiceReply();
+  await loadModelCatalog();
 
   // Discover skills
   console.log("[phoebe] discovering skills...");
@@ -51,7 +54,10 @@ async function main(): Promise<void> {
       );
       console.log(`[phoebe] data: ${DATA_DIR}`);
       console.log(`[phoebe] skills: ${SKILLS_DIR}`);
-      console.log(`[phoebe] models: ${MODELS.length}`);
+      const catalogInfo = getCatalogInfo();
+      console.log(
+        `[phoebe] models: ${catalogInfo.count} (fetched ${catalogInfo.fetchedAt})`,
+      );
       await notifyOwner();
     },
   });

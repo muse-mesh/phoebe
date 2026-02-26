@@ -21,6 +21,7 @@ interface SkillEntry {
 const BASH_TIMEOUT = 120_000;
 const MAX_OUTPUT = 50_000;
 const HOME = process.env.HOME ?? "/home/phoebe";
+const GLOBAL_SKILLS_DIR = path.join(HOME, ".agents", "skills");
 
 // ── Tool Labels ──────────────────────────────────────────────────────────────
 
@@ -99,22 +100,20 @@ function parseFrontmatter(content: string): Record<string, string> | null {
   return result;
 }
 
-export async function discoverSkills(): Promise<SkillEntry[]> {
-  skillRegistry = [];
-  try {
-    await fs.mkdir(SKILLS_DIR, { recursive: true });
-  } catch {}
-
+async function scanSkillDir(
+  dir: string,
+  registry: SkillEntry[],
+  seen: Set<string>,
+): Promise<void> {
   let entries;
   try {
-    entries = await fs.readdir(SKILLS_DIR, { withFileTypes: true });
+    entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
-    return skillRegistry;
+    return;
   }
-
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const skillDir = path.join(SKILLS_DIR, entry.name);
+    if (!entry.isDirectory() || seen.has(entry.name)) continue;
+    const skillDir = path.join(dir, entry.name);
     try {
       const content = await fs.readFile(
         path.join(skillDir, "SKILL.md"),
@@ -122,7 +121,8 @@ export async function discoverSkills(): Promise<SkillEntry[]> {
       );
       const fm = parseFrontmatter(content);
       if (fm?.name && fm?.description) {
-        skillRegistry.push({
+        seen.add(entry.name);
+        registry.push({
           name: fm.name,
           description: fm.description,
           path: skillDir,
@@ -130,6 +130,20 @@ export async function discoverSkills(): Promise<SkillEntry[]> {
       }
     } catch {}
   }
+}
+
+export async function discoverSkills(): Promise<SkillEntry[]> {
+  skillRegistry = [];
+  try {
+    await fs.mkdir(SKILLS_DIR, { recursive: true });
+  } catch {}
+
+  const seen = new Set<string>();
+
+  // Project-local skills take priority
+  await scanSkillDir(SKILLS_DIR, skillRegistry, seen);
+  // Then global ~/.agents/skills
+  await scanSkillDir(GLOBAL_SKILLS_DIR, skillRegistry, seen);
 
   console.log(`[skills] discovered ${skillRegistry.length} skills`);
   return skillRegistry;
@@ -349,7 +363,7 @@ export function buildTools() {
         });
         try {
           execSync(
-            `cp -rn ~/.config/agents/skills/*/ "${SKILLS_DIR}/" 2>/dev/null || true`,
+            `cp -rn ~/.agents/skills/*/ "${SKILLS_DIR}/" 2>/dev/null || true`,
             {
               encoding: "utf-8",
               timeout: 5000,
