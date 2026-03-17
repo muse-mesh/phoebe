@@ -51,8 +51,8 @@ graph TB
         PERSIST["Persistence Layer<br/>(JSON on disk)"]
     end
 
-    subgraph "AI Provider"
-        OR["OpenRouter API"]
+    subgraph "AI Gateway"
+        OR["Mume AI Gateway"]
         MODELS["Gemini / Claude / GPT / Llama / ..."]
     end
 
@@ -148,31 +148,31 @@ graph LR
 
 ### File Inventory (~4,000 lines of TypeScript)
 
-| File                               | Lines | Role                                                           |
-| ---------------------------------- | ----: | -------------------------------------------------------------- |
-| `src/index.ts`                     |   117 | Entry point — env loading, init sequence, graceful shutdown    |
-| `src/config.ts`                    |    38 | Environment variable resolution with defaults                  |
-| `src/logger.ts`                    |   331 | Zero-dependency ANSI structured logging                        |
-| `src/models.ts`                    |   314 | OpenRouter model catalog — fetch, cache, search, capabilities  |
-| `src/tools.ts`                     |   462 | All 7 AI-callable tools + Agent Skills registry                |
-| `src/security.ts`                  |   228 | Bash command validation + file path protection                 |
-| `src/stt.ts`                       |    88 | Speech-to-text via ElevenLabs Scribe V2 (fal.ai)               |
-| `src/tts.ts`                       |    72 | Text-to-speech via ElevenLabs Turbo v2.5 (fal.ai)              |
-| `src/errors.ts`                    |    21 | Error pattern → friendly message mapper                        |
-| `src/firestore.ts`                 |    80 | Firebase Admin SDK init + Firestore path helpers               |
-| `src/ai/stream.ts`                 |   304 | Interface-agnostic AI streaming engine                         |
-| `src/ai/channel.ts`                |    26 | OutputChannel interface definition                             |
-| `src/ai/telegram-channel.ts`       |    62 | Telegram OutputChannel implementation                          |
-| `src/ai/firestore-channel.ts`      |   133 | Firestore OutputChannel implementation                         |
-| `src/bot/instance.ts`              |   221 | Bot singleton, OpenRouter provider, Markdown→HTML, sendChunked |
-| `src/bot/commands.ts`              |   290 | All `/command` handlers + inline keyboard callbacks            |
-| `src/bot/handlers.ts`              |   250 | Text, photo, document, voice message handlers                  |
-| `src/bot/prompt.ts`                |    33 | System prompt builder                                          |
-| `src/persistence/store.ts`         |    25 | Low-level JSON read/write helpers                              |
-| `src/persistence/conversations.ts` |   168 | Conversation history with context windowing                    |
-| `src/persistence/settings.ts`      |   117 | Per-chat model, voice, voice-reply settings                    |
-| `src/persistence/users.ts`         |    55 | User profile tracking                                          |
-| `src/web/listener.ts`              |   450 | Firestore onSnapshot watcher + instance heartbeat              |
+| File                               | Lines | Role                                                        |
+| ---------------------------------- | ----: | ----------------------------------------------------------- |
+| `src/index.ts`                     |   117 | Entry point — env loading, init sequence, graceful shutdown |
+| `src/config.ts`                    |    38 | Environment variable resolution with defaults               |
+| `src/logger.ts`                    |   331 | Zero-dependency ANSI structured logging                     |
+| `src/models.ts`                    |   314 | Model catalog — fetch, cache, search, capabilities          |
+| `src/tools.ts`                     |   462 | All 7 AI-callable tools + Agent Skills registry             |
+| `src/security.ts`                  |   228 | Bash command validation + file path protection              |
+| `src/stt.ts`                       |    88 | Speech-to-text via ElevenLabs Scribe V2 (fal.ai)            |
+| `src/tts.ts`                       |    72 | Text-to-speech via ElevenLabs Turbo v2.5 (fal.ai)           |
+| `src/errors.ts`                    |    21 | Error pattern → friendly message mapper                     |
+| `src/firestore.ts`                 |    80 | Firebase Admin SDK init + Firestore path helpers            |
+| `src/ai/stream.ts`                 |   304 | Interface-agnostic AI streaming engine                      |
+| `src/ai/channel.ts`                |    26 | OutputChannel interface definition                          |
+| `src/ai/telegram-channel.ts`       |    62 | Telegram OutputChannel implementation                       |
+| `src/ai/firestore-channel.ts`      |   133 | Firestore OutputChannel implementation                      |
+| `src/bot/instance.ts`              |   221 | Bot singleton, AI provider, Markdown→HTML, sendChunked      |
+| `src/bot/commands.ts`              |   290 | All `/command` handlers + inline keyboard callbacks         |
+| `src/bot/handlers.ts`              |   250 | Text, photo, document, voice message handlers               |
+| `src/bot/prompt.ts`                |    33 | System prompt builder                                       |
+| `src/persistence/store.ts`         |    25 | Low-level JSON read/write helpers                           |
+| `src/persistence/conversations.ts` |   168 | Conversation history with context windowing                 |
+| `src/persistence/settings.ts`      |   117 | Per-chat model, voice, voice-reply settings                 |
+| `src/persistence/users.ts`         |    55 | User profile tracking                                       |
+| `src/web/listener.ts`              |   450 | Firestore onSnapshot watcher + instance heartbeat           |
 
 ---
 
@@ -201,7 +201,7 @@ sequenceDiagram
     participant Caller as Interface (Bot/Web)
     participant Engine as runAIStream
     participant SDK as AI SDK streamText()
-    participant Model as OpenRouter → Model
+    participant Model as Mume AI → Model
     participant Tools as Tool Executor
 
     Caller->>Engine: runAIStream(channel, model, messages, content)
@@ -303,7 +303,7 @@ sequenceDiagram
     participant U as User (Telegram)
     participant TG as Telegram API
     participant P as Phoebe Server
-    participant AI as OpenRouter
+    participant AI as Mume AI
 
     U->>TG: Send message
     TG->>P: grammY long-polling
@@ -358,7 +358,7 @@ sequenceDiagram
     participant W as Web App (Next.js)
     participant F as Cloud Firestore
     participant P as Phoebe Server
-    participant AI as OpenRouter
+    participant AI as Mume AI
 
     Note over U,AI: 1. User Sends Message
     U->>W: Types message, clicks Send
@@ -751,11 +751,11 @@ graph TB
 
 ## Model Catalog
 
-Phoebe fetches the full OpenRouter model catalog and caches it locally.
+Phoebe fetches the full model catalog via the Mume AI gateway and caches it locally.
 
 ### Features
 
-- **Fetch & cache** — full catalog fetched from OpenRouter API, saved to `openrouter-models.json`
+- **Fetch & cache** — full catalog fetched from Mume AI, saved to `openrouter-models.json`
 - **Search** — keyword search across model names and IDs
 - **Free filter** — `/models free` shows only models with zero prompt + completion pricing
 - **Capabilities** — detects: tools, vision, audio input/output, image output, reasoning, structured output, web search, video input, file input
@@ -791,7 +791,7 @@ All state is stored as JSON files on disk in `DATA_DIR` (mounted as a Docker vol
 | `models.json`                 | `{ chatId: modelId }`   | Per-chat model override                  |
 | `voices.json`                 | `{ chatId: voiceName }` | Per-chat TTS voice preference            |
 | `voice-reply.json`            | `{ chatId: boolean }`   | Per-chat voice reply toggle              |
-| `openrouter-models.json`      | `OpenRouterModel[]`     | Cached model catalog                     |
+| `openrouter-models.json`      | `AIModel[]`             | Cached model catalog (via Mume AI)       |
 | `conversations/{chatId}.json` | `ModelMessage[]`        | Full conversation history (max 500)      |
 
 ### Init Sequence
@@ -859,12 +859,12 @@ graph TB
     end
 
     subgraph "External APIs"
-        OPENROUTER["OpenRouter API"]
+        MUMEAI["Mume AI Gateway"]
         TELEGRAM["Telegram Bot API"]
         FAL["fal.ai (STT/TTS)"]
     end
 
-    DOCKER <-->|"HTTPS"| OPENROUTER
+    DOCKER <-->|"HTTPS"| MUMEAI
     DOCKER <-->|"Bot API (long-polling)"| TELEGRAM
     DOCKER <-->|"HTTPS"| FAL
     DOCKER <-.->|"firebase-admin<br/>(optional)"| FIRESTORE
@@ -894,16 +894,16 @@ The Docker image is built on `node:22-slim` with additional tools:
 
 ## Tech Stack Summary
 
-| Component         | Technology                  | Version |
-| ----------------- | --------------------------- | ------- |
-| Runtime           | Node.js                     | 22      |
-| Language          | TypeScript (strict, ESM)    | 5.8     |
-| Execution         | tsx (no build step)         | 4.19    |
-| AI Engine         | Vercel AI SDK               | 6.0     |
-| AI Provider       | @openrouter/ai-sdk-provider | 2.2     |
-| Telegram          | grammY                      | 1.35    |
-| Schema Validation | Zod                         | 3.25    |
-| Firestore         | firebase-admin              | 13.6    |
-| Env Loading       | dotenv                      | 17.3    |
-| Container         | Docker + Docker Compose     | —       |
-| STT/TTS           | ElevenLabs via fal.ai       | —       |
+| Component         | Technology                            | Version |
+| ----------------- | ------------------------------------- | ------- |
+| Runtime           | Node.js                               | 22      |
+| Language          | TypeScript (strict, ESM)              | 5.8     |
+| Execution         | tsx (no build step)                   | 4.19    |
+| AI Engine         | Vercel AI SDK                         | 6.0     |
+| AI Gateway        | Mume AI (@openrouter/ai-sdk-provider) | 2.2     |
+| Telegram          | grammY                                | 1.35    |
+| Schema Validation | Zod                                   | 3.25    |
+| Firestore         | firebase-admin                        | 13.6    |
+| Env Loading       | dotenv                                | 17.3    |
+| Container         | Docker + Docker Compose               | —       |
+| STT/TTS           | ElevenLabs via fal.ai                 | —       |

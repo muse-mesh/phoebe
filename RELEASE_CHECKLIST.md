@@ -35,7 +35,7 @@ Pre-release punch list for `muse-mesh/phoebe`. Work through each item before mak
 
 - [ ] **Set repo to Public** on GitHub
 - [ ] **Add repo description** — "Self-hosted AI agent with full tool access — delivered through Telegram and the web"
-- [ ] **Add repo topics** — `ai`, `telegram-bot`, `agent`, `self-hosted`, `openrouter`, `ai-sdk`, `typescript`, `docker`, `agent-skills`
+- [ ] **Add repo topics** — `ai`, `telegram-bot`, `agent`, `self-hosted`, `mume-ai`, `ai-sdk`, `typescript`, `docker`, `agent-skills`
 - [ ] **Set default branch** to `main`
 - [ ] **Enable Issues** — for bug reports and feature requests
 - [ ] **Disable Wiki** — docs live in the repo
@@ -56,7 +56,7 @@ Pre-release punch list for `muse-mesh/phoebe`. Work through each item before mak
 - [ ] **Add screenshots** — Telegram conversation showing tool use, model switching, voice reply
 - [ ] **Add a demo GIF** — 30-second screen recording of a full conversation loop
 - [ ] **Add a "Troubleshooting" section** to README — common issues (bot not responding, Docker build fails, model errors)
-- [ ] **Add a "FAQ" section** — "Can I use my own OpenRouter key directly?", "Does it work on ARM?", "How much does it cost to run?"
+- [ ] **Add a "FAQ" section** — "Can I use my own API key directly?", "Does it work on ARM?", "How much does it cost to run?"
 
 ### Code Quality
 

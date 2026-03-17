@@ -6,11 +6,16 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License" />
 </p>
 
-# Phoebe
+        ██████╗ ██╗  ██╗ ██████╗ ███████╗██████╗ ███████╗
+        ██╔══██╗██║  ██║██╔═══██╗██╔════╝██╔══██╗██╔════╝
+        ██████╔╝███████║██║   ██║█████╗  ██████╔╝█████╗
+        ██╔═══╝ ██╔══██║██║   ██║██╔══╝  ██╔══██╗██╔══╝
+        ██║     ██║  ██║╚██████╔╝███████╗██████╔╝███████╗
+        ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═════╝ ╚══════╝
 
 **A self-hosted AI agent with full tool access — delivered through Telegram and the web.**
 
-Phoebe runs in a Docker container on your own hardware. She connects to any model on [OpenRouter](https://openrouter.ai) (Gemini, Claude, GPT, Llama, etc.), has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io). Conversations stream in real-time to Telegram and to a browser UI via Firestore.
+Phoebe runs in a Docker container on your own hardware. She connects to any model on [Mume AI](https://mume.ai) (Gemini, Claude, GPT, Llama, etc.), has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io). Conversations stream in real-time to Telegram and to a browser UI via Firestore.
 
 No vendor lock-in. No cloud dependency. One `docker compose up` and you're running.
 
@@ -50,7 +55,7 @@ No vendor lock-in. No cloud dependency. One `docker compose up` and you're runni
 
 ### Multi-Model Support
 
-Access thousands of AI models through [OpenRouter](https://openrouter.ai). Switch models mid-conversation with `/model <id>`. Browse the full catalog with `/models`, filter by name or free tier, and paginate with inline keyboard navigation. Each model's capabilities (tools, vision, audio, reasoning, etc.) are detected and displayed.
+Access thousands of AI models through [Mume AI](https://mume.ai). Switch models mid-conversation with `/model <id>`. Browse the full catalog with `/models`, filter by name or free tier, and paginate with inline keyboard navigation. Each model's capabilities (tools, vision, audio, reasoning, etc.) are detected and displayed.
 
 ### Dual Interface
 
@@ -113,7 +118,7 @@ A layered defense system runs inside the container:
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
-- An API key from [Mume AI](https://mume.ai) (OpenRouter-compatible gateway)
+- An API key from [Mume AI](https://mume.ai)
 
 ### 1. Clone and configure
 
@@ -155,14 +160,14 @@ You should see Phoebe connect to Telegram and report her status to the owner.
 
 ### Optional
 
-| Variable             | Default                         | Description                                            |
-| -------------------- | ------------------------------- | ------------------------------------------------------ |
-| `MUME_BASE_URL`      | `https://mume.ai/api/v1`        | AI gateway endpoint (OpenRouter-compatible)            |
-| `OPENROUTER_API_KEY` | —                               | For fetching the model catalog from OpenRouter         |
-| `AI_MODEL`           | `google/gemini-3-flash-preview` | Default model (OpenRouter format: `provider/model`)    |
-| `MAX_STEPS`          | `25`                            | Max tool-call steps per message                        |
-| `ALLOWED_IDS`        | _(empty = everyone)_            | Comma-separated Telegram user IDs for access control   |
-| `FAL_KEY`            | —                               | [fal.ai](https://fal.ai) API key for voice (STT + TTS) |
+| Variable          | Default                         | Description                                            |
+| ----------------- | ------------------------------- | ------------------------------------------------------ |
+| `MUME_BASE_URL`   | `https://mume.ai/api/v1`        | Mume AI gateway endpoint                               |
+| `CATALOG_API_KEY` | —                               | For fetching the model catalog                         |
+| `AI_MODEL`        | `google/gemini-3-flash-preview` | Default model (`provider/model` format)                |
+| `MAX_STEPS`       | `25`                            | Max tool-call steps per message                        |
+| `ALLOWED_IDS`     | _(empty = everyone)_            | Comma-separated Telegram user IDs for access control   |
+| `FAL_KEY`         | —                               | [fal.ai](https://fal.ai) API key for voice (STT + TTS) |
 
 ### Web Interface (Optional)
 
@@ -199,7 +204,7 @@ To enable the browser UI via Firestore:
 | `/model <id>`     | Switch model (e.g. `/model anthropic/claude-sonnet-4.6`)     |
 | `/voice`          | Browse and switch TTS voice (21 voices)                      |
 | `/voicereply`     | Toggle voice replies on/off for current chat                 |
-| `/refreshmodels`  | Re-fetch model catalog from OpenRouter                       |
+| `/refreshmodels`  | Re-fetch model catalog from Mume AI                          |
 | `/clear`          | Clear conversation history for current chat                  |
 | `/restart`        | Graceful restart — owner only                                |
 
@@ -315,7 +320,7 @@ Phoebe has two interfaces that share a single AI streaming core:
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │  OpenRouter │   @openrouter/ai-sdk-provider
+                    │   Mume AI   │   mume.ai gateway
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -345,7 +350,7 @@ phoebe/
 │   ├── index.ts              # Entry point — env, init, graceful shutdown
 │   ├── config.ts             # Environment variable resolution
 │   ├── logger.ts             # Zero-dep ANSI-colored structured logging
-│   ├── models.ts             # OpenRouter catalog — fetch, cache, query
+│   ├── models.ts             # Model catalog — fetch, cache, query
 │   ├── tools.ts              # 7 built-in tools + Agent Skills registry
 │   ├── security.ts           # Command & path validation
 │   ├── stt.ts                # Speech-to-text (ElevenLabs via fal.ai)
@@ -384,7 +389,7 @@ phoebe/
 | `models.json`                 | Per-chat model overrides                              |
 | `voices.json`                 | Per-chat TTS voice preferences                        |
 | `voice-reply.json`            | Per-chat voice reply toggle                           |
-| `openrouter-models.json`      | Cached OpenRouter model catalog                       |
+| `openrouter-models.json`      | Cached model catalog                                  |
 | `conversations/<chatId>.json` | Full conversation history per chat (max 500 messages) |
 
 ---
@@ -407,17 +412,17 @@ pnpm typecheck          # tsc --noEmit
 
 ### Tech Stack
 
-| Component   | Technology                                                                   |
-| ----------- | ---------------------------------------------------------------------------- |
-| Runtime     | Node.js 22 + [tsx](https://github.com/privatenumber/tsx)                     |
-| Language    | TypeScript (strict, ESM)                                                     |
-| AI Engine   | [Vercel AI SDK v6](https://sdk.vercel.ai) (`streamText`)                     |
-| AI Provider | [@openrouter/ai-sdk-provider](https://github.com/OpenRouter/ai-sdk-provider) |
-| Telegram    | [grammY](https://grammy.dev)                                                 |
-| Persistence | JSON files on disk (Docker volume)                                           |
-| Web Sync    | Cloud Firestore (firebase-admin)                                             |
-| STT/TTS     | ElevenLabs via [fal.ai](https://fal.ai)                                      |
-| Container   | Docker + Docker Compose                                                      |
+| Component   | Technology                                               |
+| ----------- | -------------------------------------------------------- |
+| Runtime     | Node.js 22 + [tsx](https://github.com/privatenumber/tsx) |
+| Language    | TypeScript (strict, ESM)                                 |
+| AI Engine   | [Vercel AI SDK v6](https://sdk.vercel.ai) (`streamText`) |
+| AI Gateway  | [Mume AI](https://mume.ai)                               |
+| Telegram    | [grammY](https://grammy.dev)                             |
+| Persistence | JSON files on disk (Docker volume)                       |
+| Web Sync    | Cloud Firestore (firebase-admin)                         |
+| STT/TTS     | ElevenLabs via [fal.ai](https://fal.ai)                  |
+| Container   | Docker + Docker Compose                                  |
 
 ### Dependencies
 
@@ -427,7 +432,7 @@ pnpm typecheck          # tsc --noEmit
 | ----------------------------- | ----------------------------------------------------- |
 | `grammy`                      | Telegram bot framework                                |
 | `ai`                          | Vercel AI SDK — `streamText`, `tool()`, message types |
-| `@openrouter/ai-sdk-provider` | OpenRouter provider for AI SDK                        |
+| `@openrouter/ai-sdk-provider` | AI provider SDK (Mume AI gateway)                     |
 | `zod`                         | Schema validation for tool parameters                 |
 | `firebase-admin`              | Firestore server-side SDK                             |
 | `dotenv`                      | Environment variable loading                          |

@@ -154,7 +154,7 @@ export function registerCommands() {
     const info = getCatalogInfo();
     if (info.count === 0) {
       return ctx.reply(
-        "No models in catalog.\n\nSet OPENROUTER_API_KEY and run /refreshmodels to load models.",
+        "No models in catalog.\n\nSet CATALOG_API_KEY and run /refreshmodels to load models.",
       );
     }
     const arg = ctx.message!.text.replace(/^\/models(@\w+)?\s*/, "").trim();
@@ -205,7 +205,7 @@ export function registerCommands() {
 
   bot.command("refreshmodels", async (ctx) => {
     try {
-      await ctx.reply("Refreshing model catalog from OpenRouter...");
+      await ctx.reply("Refreshing model catalog from Mume AI...");
       const count = await refreshModelCatalog();
       return ctx.reply(`Model catalog updated: ${count} models.`);
     } catch (err) {

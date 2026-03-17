@@ -1,19 +1,19 @@
-// ── OpenRouter Model Catalog ─────────────────────────────────────────────────
-// Fetches, caches, and queries the full OpenRouter model catalog.
+// ── Model Catalog ─────────────────────────────────────────────────────────────────
+// Fetches, caches, and queries the full model catalog via Mume AI.
 // Models are stored on disk and only refreshed when explicitly requested.
 
 import fs from "fs/promises";
 import path from "path";
-import { DATA_DIR, OPENROUTER_API_KEY } from "./config.js";
+import { DATA_DIR, CATALOG_API_KEY } from "./config.js";
 import log from "./logger.js";
 
 const MODELS_FILE = path.join(DATA_DIR, "openrouter-models.json");
-const OPENROUTER_API = "https://openrouter.ai/api/v1";
+const MUME_CATALOG_API = "https://openrouter.ai/api/v1";
 const PAGE_SIZE = 15;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface OpenRouterModel {
+export interface AIModel {
   id: string;
   name: string;
   created: number;
@@ -42,7 +42,7 @@ export interface OpenRouterModel {
 interface ModelCatalog {
   fetchedAt: string;
   count: number;
-  models: OpenRouterModel[];
+  models: AIModel[];
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ let catalog: ModelCatalog | null = null;
 
 // ── Load / Refresh ───────────────────────────────────────────────────────────
 
-/** Load catalog from disk, or fetch from OpenRouter if not cached. */
+/** Load catalog from disk, or fetch from Mume AI if not cached. */
 export async function loadModelCatalog(): Promise<void> {
   try {
     const raw = await fs.readFile(MODELS_FILE, "utf-8");
@@ -60,39 +60,39 @@ export async function loadModelCatalog(): Promise<void> {
       fetched: catalog.fetchedAt,
     });
   } catch {
-    if (!OPENROUTER_API_KEY) {
+    if (!CATALOG_API_KEY) {
       log.warn(
         "models",
-        "no cached catalog and no OPENROUTER_API_KEY — catalog empty",
+        "no cached catalog and no CATALOG_API_KEY — catalog empty",
       );
       catalog = { fetchedAt: "never", count: 0, models: [] };
       return;
     }
-    log.info("models", "no cached catalog, fetching from OpenRouter…");
+    log.info("models", "no cached catalog, fetching from Mume AI…");
     await refreshModelCatalog();
   }
 }
 
-/** Fetch fresh model list from OpenRouter and save to disk. */
+/** Fetch fresh model list from Mume AI and save to disk. */
 export async function refreshModelCatalog(): Promise<number> {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is required to fetch models");
+  if (!CATALOG_API_KEY) {
+    throw new Error("CATALOG_API_KEY is required to fetch models");
   }
 
-  const res = await fetch(`${OPENROUTER_API}/models`, {
-    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}` },
+  const res = await fetch(`${MUME_CATALOG_API}/models`, {
+    headers: { Authorization: `Bearer ${CATALOG_API_KEY}` },
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(
-      `OpenRouter API error ${res.status}: ${body.slice(0, 200)}`,
+      `Mume AI catalog error ${res.status}: ${body.slice(0, 200)}`,
     );
   }
 
   const data = (await res.json()) as { data: any[] };
 
-  const models: OpenRouterModel[] = (data.data ?? []).map((m: any) => ({
+  const models: AIModel[] = (data.data ?? []).map((m: any) => ({
     id: m.id,
     name: m.name,
     created: m.created ?? 0,
@@ -133,7 +133,7 @@ export async function refreshModelCatalog(): Promise<number> {
 // ── Queries ──────────────────────────────────────────────────────────────────
 
 /** All models in the catalog. */
-export function getModels(): OpenRouterModel[] {
+export function getModels(): AIModel[] {
   return catalog?.models ?? [];
 }
 
@@ -150,7 +150,7 @@ export function getModelsPage(
   page: number,
   options?: { pageSize?: number; filter?: string; freeOnly?: boolean },
 ): {
-  models: OpenRouterModel[];
+  models: AIModel[];
   page: number;
   totalPages: number;
   total: number;
@@ -192,7 +192,7 @@ export function getModelsPage(
 }
 
 /** Find model by ID or partial match. */
-export function findModel(query: string): OpenRouterModel | undefined {
+export function findModel(query: string): AIModel | undefined {
   const lower = query.trim().toLowerCase();
   const models = catalog?.models ?? [];
 
@@ -206,7 +206,7 @@ export function findModel(query: string): OpenRouterModel | undefined {
 }
 
 /** Get only free models. */
-export function getFreeModels(): OpenRouterModel[] {
+export function getFreeModels(): AIModel[] {
   return (catalog?.models ?? []).filter(
     (m) =>
       parseFloat(m.pricing.prompt) === 0 &&
