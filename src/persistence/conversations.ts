@@ -8,6 +8,7 @@ import type { ModelMessage, ToolModelMessage, UserContent } from "ai";
 import { DATA_DIR } from "../config.js";
 import { saveJSON, loadJSON } from "./store.js";
 import path from "path";
+import log from "../logger.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export async function saveConversation(chatId: number): Promise<void> {
     return { ...msg, content: cleanParts };
   });
   await saveJSON(convPath(chatId), sanitized).catch((e: Error) =>
-    console.error(`[persist] save conv ${chatId} failed:`, e.message),
+    log.error("persist", `save conv failed`, { chatId, err: e.message }),
   );
 }
 

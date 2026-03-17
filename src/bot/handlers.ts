@@ -1,12 +1,13 @@
 // ── AI Message Handler ───────────────────────────────────────────────────────
 // Core streaming handler for all message types (text, photo, document, voice).
+// Delegates AI streaming to the shared ai/stream module via TelegramChannel.
 
 import { InputFile } from "grammy";
 import type { Context } from "grammy";
-import { streamText, stepCountIs } from "ai";
 import type { UserContent } from "ai";
 import { speechToText } from "../stt.js";
 import { textToSpeech } from "../tts.js";
+import log from "../logger.js";
 import {
   getUserName,
   getChatModel,
@@ -17,236 +18,86 @@ import {
   appendResponseMessages,
   isVoiceReplyEnabled,
 } from "../persistence/index.js";
-import { buildTools, toolLabel } from "../tools.js";
-import { formatError } from "../errors.js";
-import { buildPrompt } from "./prompt.js";
+import { buildTools } from "../tools.js";
+import { bot, downloadTelegramFile } from "./instance.js";
 import {
-  provider,
-  bot,
-  sendChunked,
-  downloadTelegramFile,
-} from "./instance.js";
-import { MAX_STEPS } from "../config.js";
-
-// ── Constants ────────────────────────────────────────────────────────────────
-
-const STREAM_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes per request
+  TelegramChannel,
+  runAIStream,
+  toolNames as aiToolNames,
+} from "../ai/index.js";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
-const tools = buildTools();
-export const toolNames = Object.keys(tools);
-console.log(`[phoebe] tools ready: ${toolNames.join(", ")}`);
+// Ensure tools are built so side effects (console.log) run
+buildTools();
+export const toolNames = aiToolNames;
 
 // ── Core AI Handler ──────────────────────────────────────────────────────────
+
+// Per-chat abort controllers — if a new message arrives while processing,
+// the in-flight request is aborted so the bot doesn't get stuck.
+const inflightRequests = new Map<number, AbortController>();
 
 export async function handleAIMessage(
   ctx: Context,
   userContent: UserContent,
   options?: { replyWithVoice?: boolean },
 ) {
+  const chatId = ctx.chat!.id;
   const userName = getUserName(ctx.from ?? undefined);
+  const channel = new TelegramChannel(ctx);
+
+  // Abort any in-flight request for this chat
+  const existing = inflightRequests.get(chatId);
+  if (existing) {
+    log.info("bot", "aborting in-flight request", { chat: chatId });
+    existing.abort();
+  }
+
+  const abortController = new AbortController();
+  inflightRequests.set(chatId, abortController);
 
   try {
-    await ctx.replyWithChatAction("typing");
-    await addUserMessage(ctx.chat!.id, userContent);
+    await addUserMessage(chatId, userContent);
 
-    const typingInterval = setInterval(() => {
-      ctx.replyWithChatAction("typing").catch(() => {});
-    }, 4000);
+    const result = await runAIStream({
+      channel,
+      modelId: getChatModel(chatId),
+      userName,
+      contextMessages: await getContextMessages(chatId),
+      userContent,
+      abortSignal: abortController.signal,
+    });
 
-    let stillWorkingTimer: ReturnType<typeof setTimeout> | null = null;
-    let toolStepCount = 0;
-    stillWorkingTimer = setTimeout(() => {
-      ctx.reply("Still working on it...").catch(() => {});
-    }, 20000);
-
-    const systemPrompt = buildPrompt(userName);
-    const sentToolMessages = new Set<string>();
-    let sentTextLength = 0;
-
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => {
-      console.log(
-        `[bot] timeout fired after ${STREAM_TIMEOUT_MS / 1000}s, aborting...`,
-      );
-      abortController.abort();
-    }, STREAM_TIMEOUT_MS);
-
-    const currentModel = getChatModel(ctx.chat!.id);
-    let result;
-    try {
-      result = streamText({
-        model: provider(currentModel),
-        system: systemPrompt,
-        messages: await getContextMessages(ctx.chat!.id),
-        tools,
-        abortSignal: abortController.signal,
-        stopWhen: stepCountIs(MAX_STEPS),
-        onStepFinish: (step) => {
-          try {
-            const toolCalls = step.toolCalls ?? [];
-            const stepText = (step.text ?? "").trim();
-
-            if (toolCalls.length > 0) {
-              toolStepCount++;
-
-              if (stepText) {
-                sendChunked(ctx, stepText).catch(() => {});
-                sentTextLength += (step.text ?? "").length;
-              } else {
-                for (const tc of toolCalls) {
-                  const label = toolLabel(tc.toolName);
-                  if (!sentToolMessages.has(label)) {
-                    sentToolMessages.add(label);
-                    ctx.reply(`${label}...`).catch(() => {});
-                  }
-                }
-              }
-
-              const names = toolCalls.map((tc) => tc.toolName).join(", ");
-              console.log(
-                `[agent] step ${toolStepCount}: ${names} (${step.finishReason})${stepText ? ` [${stepText.length}ch]` : ""}`,
-              );
-
-              if (stillWorkingTimer) clearTimeout(stillWorkingTimer);
-              if (step.finishReason !== "stop") {
-                stillWorkingTimer = setTimeout(() => {
-                  ctx.reply("Still working...").catch(() => {});
-                }, 25000);
-              }
-            }
-          } catch (stepErr) {
-            console.error("[bot] onStepFinish error:", stepErr);
-          }
-        },
-      });
-    } catch (initErr) {
-      console.error("[bot] streamText init error:", initErr);
-      clearTimeout(timeoutId);
-      clearInterval(typingInterval);
-      if (stillWorkingTimer) clearTimeout(stillWorkingTimer);
-      await ctx.reply(formatError(initErr)).catch(() => {});
-      return;
+    // Persist response messages
+    if (result.responseMessages.length > 0) {
+      await appendResponseMessages(chatId, result.responseMessages);
     }
-
-    // Collect streamed text
-    let fullText = "";
-    let timedOut = false;
-    try {
-      for await (const chunk of result.textStream) {
-        fullText += chunk;
-      }
-    } catch (err) {
-      if (abortController.signal.aborted) {
-        timedOut = true;
-        console.log(
-          `[bot] request timed out after ${STREAM_TIMEOUT_MS / 1000}s, steps: ${toolStepCount}`,
-        );
-      } else {
-        console.error("[bot] stream error:", err);
-        clearTimeout(timeoutId);
-        clearInterval(typingInterval);
-        if (stillWorkingTimer) clearTimeout(stillWorkingTimer);
-        await ctx.reply(formatError(err)).catch(() => {});
-        return;
-      }
+    if (result.timedOut) {
+      await addAssistantMessage(chatId, "(timed out - task incomplete)");
     }
-
-    clearTimeout(timeoutId);
-    clearInterval(typingInterval);
-    if (stillWorkingTimer) clearTimeout(stillWorkingTimer);
-
-    if (timedOut) {
-      try {
-        const resp = await result.response;
-        if (resp.messages.length > 0) {
-          await appendResponseMessages(ctx.chat!.id, resp.messages);
-        }
-      } catch {
-        /* response may not be available on abort */
-      }
-
-      const partial = fullText.trim();
-      if (partial) await sendChunked(ctx, partial);
-      await addAssistantMessage(ctx.chat!.id, "(timed out - task incomplete)");
-      await ctx.reply(
-        "Request timed out. Try a simpler request, or /clear to reset.",
-      );
-      return;
-    }
-
-    // Save ALL response messages
-    try {
-      const resp = await result.response;
-      if (resp.messages.length > 0) {
-        await appendResponseMessages(ctx.chat!.id, resp.messages);
-      }
-    } catch (err) {
-      console.error("[bot] failed to save response messages:", err);
-    }
-
-    // Handle empty response
-    if (!fullText.trim()) {
-      try {
-        const finishReason = await result.finishReason;
-        console.log(
-          `[bot] empty response — finishReason: ${finishReason}, model: ${currentModel}`,
-        );
-        if (finishReason === "error" || finishReason === "other") {
-          await ctx.reply(
-            `Model error (${currentModel}). Try /model to switch.`,
-          );
-          return;
-        }
-      } catch (err) {
-        console.error("[bot] response check error:", err);
-        await ctx.reply(formatError(err)).catch(() => {});
-        return;
-      }
-
-      if (toolStepCount > 0) {
-        if (sentTextLength > 0) return;
-        fullText = "(task completed)";
-      } else {
-        await ctx.reply(
-          `Empty response from ${currentModel}. Try /model or /clear.`,
-        );
-        return;
-      }
-    }
-
-    const remainingText =
-      sentTextLength > 0
-        ? fullText.slice(sentTextLength).trim()
-        : fullText.trim();
-
-    // Always send the text reply
-    await sendChunked(ctx, remainingText);
 
     // Voice reply: only if user enabled it and sent a voice message
+    const remainingText = result.fullText.trim();
     if (
       options?.replyWithVoice &&
-      isVoiceReplyEnabled(ctx.chat!.id) &&
+      isVoiceReplyEnabled(chatId) &&
       remainingText
     ) {
-      const voice = getChatVoice(ctx.chat!.id);
+      const voice = getChatVoice(chatId);
       const audioBuffer = await textToSpeech(remainingText, voice);
       if (audioBuffer) {
-        try {
-          await ctx.replyWithVoice(new InputFile(audioBuffer, "reply.ogg"));
-        } catch {
-          try {
-            await ctx.replyWithAudio(new InputFile(audioBuffer, "phoebe.mp3"));
-          } catch (e) {
-            console.error("[tts] send failed:", (e as Error).message);
-          }
-        }
+        await channel.sendVoice(audioBuffer);
       }
     }
   } catch (err) {
-    console.error("[bot] error:", err);
-    await ctx.reply(formatError(err)).catch(() => {});
+    log.error("bot", "message handling failed", {}, err);
+    await channel.sendError(err instanceof Error ? err.message : String(err));
+  } finally {
+    // Clean up in-flight tracking
+    if (inflightRequests.get(chatId) === abortController) {
+      inflightRequests.delete(chatId);
+    }
   }
 }
 
@@ -254,7 +105,14 @@ export async function handleAIMessage(
 
 export function registerMessageHandlers() {
   // Text messages
-  bot.on("message:text", (ctx) => handleAIMessage(ctx, ctx.message.text));
+  bot.on("message:text", (ctx) => {
+    log.userMessage(
+      "bot",
+      { from: ctx.from?.id, chat: ctx.chat.id, type: "text" },
+      ctx.message.text,
+    );
+    return handleAIMessage(ctx, ctx.message.text);
+  });
 
   // Photos
   bot.on("message:photo", async (ctx) => {
@@ -263,12 +121,15 @@ export function registerMessageHandlers() {
       const largest = sizes[sizes.length - 1];
       const caption = ctx.message.caption ?? "What's in this image?";
 
-      console.log(
-        `[bot] photo from ${ctx.from?.id}: ${largest.width}x${largest.height} (${largest.file_size ?? "?"}B) caption="${caption.slice(0, 80)}"`,
-      );
+      log.info("bot", "photo received", {
+        from: ctx.from?.id,
+        size: `${largest.width}x${largest.height}`,
+        bytes: largest.file_size ?? "?",
+        caption: caption.slice(0, 80),
+      });
 
       const buffer = await downloadTelegramFile(ctx, largest.file_id);
-      console.log(`[bot] downloaded photo: ${buffer.length} bytes`);
+      log.info("bot", "downloaded photo", { bytes: buffer.length });
 
       const content: UserContent = [
         { type: "text", text: caption },
@@ -276,7 +137,7 @@ export function registerMessageHandlers() {
       ];
       await handleAIMessage(ctx, content);
     } catch (err) {
-      console.error("[bot] photo error:", err);
+      log.error("bot", "photo processing failed", {}, err);
       await ctx.reply("Failed to process image. Try again.").catch(() => {});
     }
   });
@@ -297,12 +158,15 @@ export function registerMessageHandlers() {
         return;
       }
 
-      console.log(
-        `[bot] document from ${ctx.from?.id}: ${name} (${mime}, ${size}B)`,
-      );
+      log.info("bot", "document received", {
+        from: ctx.from?.id,
+        name,
+        mime,
+        bytes: size,
+      });
 
       const buffer = await downloadTelegramFile(ctx, doc.file_id);
-      console.log(`[bot] downloaded document: ${buffer.length} bytes`);
+      log.info("bot", "downloaded document", { bytes: buffer.length });
 
       if (mime.startsWith("image/")) {
         const content: UserContent = [
@@ -338,7 +202,7 @@ export function registerMessageHandlers() {
       ];
       await handleAIMessage(ctx, content);
     } catch (err) {
-      console.error("[bot] document error:", err);
+      log.error("bot", "document processing failed", {}, err);
       await ctx.reply("Failed to process document. Try again.").catch(() => {});
     }
   });
@@ -347,15 +211,20 @@ export function registerMessageHandlers() {
   bot.on("message:voice", async (ctx) => {
     try {
       const voice = ctx.message.voice;
-      console.log(
-        `[bot] voice from ${ctx.from?.id}: ${voice.duration}s (${voice.mime_type ?? "audio/ogg"}, ${voice.file_size ?? "?"}B)`,
-      );
+      log.info("bot", "voice received", {
+        from: ctx.from?.id,
+        duration: `${voice.duration}s`,
+        mime: voice.mime_type ?? "audio/ogg",
+        bytes: voice.file_size ?? "?",
+      });
 
       await ctx.replyWithChatAction("typing");
 
       const file = await ctx.api.getFile(voice.file_id);
       const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
-      console.log(`[bot] voice file URL ready (${voice.file_size ?? "?"}B)`);
+      log.info("bot", "voice file URL ready", {
+        bytes: voice.file_size ?? "?",
+      });
 
       const { text: transcript, language } = await speechToText(fileUrl);
 
@@ -364,14 +233,15 @@ export function registerMessageHandlers() {
         return;
       }
 
-      console.log(
-        `[bot] STT (${language ?? "?"}): "${transcript.slice(0, 100)}${transcript.length > 100 ? "..." : ""}"`,
-      );
+      log.info("stt", "transcribed", {
+        lang: language ?? "?",
+        text: transcript.slice(0, 100) + (transcript.length > 100 ? "…" : ""),
+      });
 
       const textForModel = `[Voice message]: ${transcript}`;
       await handleAIMessage(ctx, textForModel, { replyWithVoice: true });
     } catch (err) {
-      console.error("[bot] voice error:", err);
+      log.error("bot", "voice processing failed", {}, err);
       await ctx
         .reply("Failed to process voice message. Try again.")
         .catch(() => {});

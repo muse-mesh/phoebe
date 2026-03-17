@@ -2,7 +2,6 @@
 // All /command handlers and callback query handlers.
 
 import fs from "fs/promises";
-import { exec } from "child_process";
 import { InlineKeyboard } from "grammy";
 import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID } from "../config.js";
 import {
@@ -35,6 +34,7 @@ import {
 import { getSkillCount, discoverSkills } from "../tools.js";
 import { bot, startedAt } from "./instance.js";
 import { toolNames } from "./handlers.js";
+import log from "../logger.js";
 
 // ── Model Browsing Helpers ───────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ export function registerCommands() {
   bot.command("start", (ctx) =>
     ctx.reply(
       `Hey${ctx.from?.first_name ? " " + ctx.from.first_name : ""}! I'm Phoebe\n\n` +
-        "AI assistant on your Raspberry Pi.\n" +
+        "Self-hosted AI assistant.\n" +
         "Full bash access, file management, 800+ skills.\n\n" +
         "/status - Info\n" +
         "/tools - List tools\n" +
@@ -102,7 +102,7 @@ export function registerCommands() {
         "/voicereply - Toggle voice replies\n" +
         "/refreshmodels - Update model catalog\n" +
         "/clear - Clear history\n" +
-        "/restart - Restart Pi",
+        "/restart - Restart bot",
     ),
   );
 
@@ -183,7 +183,7 @@ export function registerCommands() {
     await saveChatModels().catch(() => {});
     const model = findModel(modelId);
     const caps = getModelCapabilities(modelId);
-    console.log(`[model] chat ${ctx.chat.id} -> ${modelId}`);
+    log.info("model", `switched`, { chat: ctx.chat.id, model: modelId });
     const info = model
       ? `Switched to: ${model.id}\n${model.name}\nContext: ${formatContextLength(model.context_length)}\nPrice: ${formatPrice(model.pricing)}${caps.length ? `\nCapabilities: ${caps.join(", ")}` : ""}`
       : `Model: ${modelId}`;
@@ -195,7 +195,7 @@ export function registerCommands() {
     const newValue = !current;
     chatVoiceReply.set(ctx.chat.id, newValue);
     await saveChatVoiceReply().catch(() => {});
-    console.log(`[voicereply] chat ${ctx.chat.id} -> ${newValue}`);
+    log.info("voicereply", `toggled`, { chat: ctx.chat.id, enabled: newValue });
     return ctx.reply(
       newValue
         ? "Voice replies enabled. I'll reply with audio to voice messages."
@@ -233,7 +233,7 @@ export function registerCommands() {
     }
     chatVoices.set(ctx.chat.id, voice);
     await saveChatVoices().catch(() => {});
-    console.log(`[voice] chat ${ctx.chat.id} -> ${voice}`);
+    log.info("voice", `switched`, { chat: ctx.chat.id, voice });
     return ctx.reply(`Voice: ${voice}`);
   });
 
@@ -249,9 +249,8 @@ export function registerCommands() {
     try {
       const { persistAll } = await import("../persistence/index.js");
       await persistAll();
-      exec("sudo shutdown -r +0", (err) => {
-        if (err) console.error("[restart] failed:", err.message);
-      });
+      // Graceful exit — Docker restart policy or PM2 will bring us back
+      setTimeout(() => process.exit(0), 500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       await ctx.reply(`Restart failed: ${msg}`);

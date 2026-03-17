@@ -1,4 +1,25 @@
+# Dependencies
 node_modules/
-data/
+
+# Environment & secrets
 .env
+*.pem
+*.key
+
+# Data & runtime
+data/
+skills/
+dist/
+
+# Logs
 *.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

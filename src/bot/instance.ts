@@ -12,12 +12,21 @@ import {
   ALLOWED_IDS,
 } from "../config.js";
 import { trackUser } from "../persistence/index.js";
+import log from "../logger.js";
 
 // ── AI Provider ──────────────────────────────────────────────────────────────
 
 export const provider = createOpenRouter({
   baseURL: MUME_BASE_URL,
   apiKey: MUME_API_KEY,
+  // Disable gzip to prevent Z_DATA_ERROR ("invalid distance too far back")
+  // on long SSE streams. Node's undici auto-decompresses gzip, but the
+  // compressed data can corrupt mid-stream through proxies/gateways.
+  fetch: async (url, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("Accept-Encoding", "identity");
+    return globalThis.fetch(url, { ...init, headers });
+  },
 });
 
 // ── Bot Instance ─────────────────────────────────────────────────────────────
@@ -29,21 +38,146 @@ const TELEGRAM_LIMIT = 4096;
 bot.catch((err) => {
   const ctx = err.ctx;
   const e = err.error;
-  console.error(`[bot] Error handling update ${ctx?.update?.update_id}:`, e);
+  log.error(
+    "bot",
+    "error handling update",
+    { updateId: ctx?.update?.update_id },
+    e,
+  );
   ctx?.reply?.("Something went wrong. Please try again.").catch(() => {});
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// ── Markdown → Telegram HTML ─────────────────────────────────────────────────
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Convert standard GitHub-flavored Markdown to Telegram-compatible HTML.
+ * Handles: code blocks, inline code, bold, italic, strikethrough, links.
+ * Falls back gracefully — unrecognized patterns are left as-is.
+ */
+export function markdownToTelegramHtml(md: string): string {
+  // Protect code blocks and inline code from further processing
+  const codeBlocks: string[] = [];
+  const inlineCodes: string[] = [];
+
+  // Replace fenced code blocks
+  let result = md.replace(/```(?:\w*)?\n([\s\S]*?)```/g, (_, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre>${escapeHtml(code.trimEnd())}</pre>`);
+    return `\x00CB${idx}\x00`;
+  });
+
+  // Replace inline code
+  result = result.replace(/`([^`\n]+)`/g, (_, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+    return `\x00IC${idx}\x00`;
+  });
+
+  // Escape HTML in remaining text
+  result = escapeHtml(result);
+
+  // Bold: **text**
+  result = result.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+  // Italic: *text* (single asterisk, not adjacent to another)
+  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
+
+  // Strikethrough: ~~text~~
+  result = result.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+  // Links: [text](url)
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Restore code blocks and inline code
+  result = result.replace(
+    /\x00CB(\d+)\x00/g,
+    (_, idx) => codeBlocks[parseInt(idx)],
+  );
+  result = result.replace(
+    /\x00IC(\d+)\x00/g,
+    (_, idx) => inlineCodes[parseInt(idx)],
+  );
+
+  return result;
+}
+
 export async function sendChunked(
-  ctx: { reply: (text: string) => Promise<unknown> },
+  ctx: {
+    reply: (
+      text: string,
+      options?: Record<string, unknown>,
+    ) => Promise<unknown>;
+  },
   text: string,
 ): Promise<void> {
   if (!text) return;
-  for (let i = 0; i < text.length; i += TELEGRAM_LIMIT) {
-    await ctx.reply(text.slice(i, i + TELEGRAM_LIMIT)).catch((e) => {
-      console.error("[bot] send error:", (e as Error).message);
-    });
+
+  // Convert markdown to Telegram HTML
+  const html = markdownToTelegramHtml(text);
+
+  // Send a single chunk with HTML
+  const sendOne = async (chunk: string, htmlChunk: string) => {
+    try {
+      await ctx.reply(htmlChunk, { parse_mode: "HTML" });
+    } catch {
+      // Fallback to plain text if HTML parsing fails
+      await ctx.reply(chunk).catch((e) => {
+        log.error("bot", "send chunk failed", { err: (e as Error).message });
+      });
+    }
+  };
+
+  // If it fits in one message, send directly
+  if (text.length <= TELEGRAM_LIMIT && html.length <= TELEGRAM_LIMIT) {
+    await sendOne(text, html);
+    return;
+  }
+
+  // Smart splitting on the plain text, then convert each chunk
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= TELEGRAM_LIMIT) {
+      await sendOne(remaining, markdownToTelegramHtml(remaining));
+      break;
+    }
+
+    // Find the best split point within the limit
+    let splitAt = -1;
+    const searchWindow = remaining.slice(0, TELEGRAM_LIMIT);
+
+    // Try double-newline (paragraph break) first
+    const paraBreak = searchWindow.lastIndexOf("\n\n");
+    if (paraBreak > TELEGRAM_LIMIT * 0.3) {
+      splitAt = paraBreak + 2;
+    } else {
+      // Try single newline
+      const lineBreak = searchWindow.lastIndexOf("\n");
+      if (lineBreak > TELEGRAM_LIMIT * 0.3) {
+        splitAt = lineBreak + 1;
+      } else {
+        // Try space
+        const spaceBreak = searchWindow.lastIndexOf(" ");
+        if (spaceBreak > TELEGRAM_LIMIT * 0.5) {
+          splitAt = spaceBreak + 1;
+        } else {
+          splitAt = TELEGRAM_LIMIT;
+        }
+      }
+    }
+
+    const chunk = remaining.slice(0, splitAt);
+    remaining = remaining.slice(splitAt);
+
+    await sendOne(chunk, markdownToTelegramHtml(chunk));
   }
 }
 
@@ -61,10 +195,10 @@ export async function downloadTelegramFile(
       if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       return Buffer.from(await res.arrayBuffer());
     } catch (err) {
-      console.error(
-        `[bot] file download attempt ${attempt}/${MAX_RETRIES} failed:`,
-        (err as Error).message,
-      );
+      log.error("bot", "file download failed", {
+        attempt: `${attempt}/${MAX_RETRIES}`,
+        err: (err as Error).message,
+      });
       if (attempt === MAX_RETRIES) throw err;
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     }

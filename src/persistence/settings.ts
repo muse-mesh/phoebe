@@ -4,6 +4,7 @@
 import path from "path";
 import { DATA_DIR, DEFAULT_MODEL } from "../config.js";
 import { saveJSON, loadJSON } from "./store.js";
+import log from "../logger.js";
 
 // ── Chat Model Overrides ─────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ export async function loadChatModels(): Promise<void> {
   if (data && typeof data === "object") {
     for (const [k, v] of Object.entries(data)) chatModels.set(Number(k), v);
   }
-  console.log(`[persist] loaded ${chatModels.size} model overrides`);
+  log.info("persist", `loaded ${chatModels.size} model overrides`);
 }
 
 export async function saveChatModels(): Promise<void> {
@@ -70,7 +71,7 @@ export async function loadChatVoices(): Promise<void> {
     for (const [k, v] of Object.entries(data))
       chatVoices.set(Number(k), v as TTSVoice);
   }
-  console.log(`[persist] loaded ${chatVoices.size} voice overrides`);
+  log.info("persist", `loaded ${chatVoices.size} voice overrides`);
 }
 
 export async function saveChatVoices(): Promise<void> {
@@ -101,7 +102,7 @@ export async function loadChatVoiceReply(): Promise<void> {
     for (const [k, v] of Object.entries(data))
       chatVoiceReply.set(Number(k), Boolean(v));
   }
-  console.log(`[persist] loaded ${chatVoiceReply.size} voice reply settings`);
+  log.info("persist", `loaded ${chatVoiceReply.size} voice reply settings`);
 }
 
 export async function saveChatVoiceReply(): Promise<void> {

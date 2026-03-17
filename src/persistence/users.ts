@@ -3,6 +3,7 @@
 import path from "path";
 import { DATA_DIR } from "../config.js";
 import { saveJSON, loadJSON } from "./store.js";
+import log from "../logger.js";
 
 export interface UserProfile {
   id: number;
@@ -25,7 +26,7 @@ export async function loadUserProfiles(): Promise<void> {
   if (Array.isArray(data)) {
     for (const u of data) userProfiles.set(u.id, u);
   }
-  console.log(`[persist] loaded ${userProfiles.size} user profiles`);
+  log.info("persist", `loaded ${userProfiles.size} user profiles`);
 }
 
 export async function saveUserProfiles(): Promise<void> {

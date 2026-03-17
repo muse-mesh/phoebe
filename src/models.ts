@@ -5,6 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { DATA_DIR, OPENROUTER_API_KEY } from "./config.js";
+import log from "./logger.js";
 
 const MODELS_FILE = path.join(DATA_DIR, "openrouter-models.json");
 const OPENROUTER_API = "https://openrouter.ai/api/v1";
@@ -55,18 +56,19 @@ export async function loadModelCatalog(): Promise<void> {
   try {
     const raw = await fs.readFile(MODELS_FILE, "utf-8");
     catalog = JSON.parse(raw) as ModelCatalog;
-    console.log(
-      `[models] loaded ${catalog.models.length} models from disk (fetched ${catalog.fetchedAt})`,
-    );
+    log.info("models", `loaded ${catalog.models.length} models from disk`, {
+      fetched: catalog.fetchedAt,
+    });
   } catch {
     if (!OPENROUTER_API_KEY) {
-      console.warn(
-        "[models] no cached catalog and no OPENROUTER_API_KEY — model catalog empty",
+      log.warn(
+        "models",
+        "no cached catalog and no OPENROUTER_API_KEY — catalog empty",
       );
       catalog = { fetchedAt: "never", count: 0, models: [] };
       return;
     }
-    console.log("[models] no cached catalog, fetching from OpenRouter...");
+    log.info("models", "no cached catalog, fetching from OpenRouter…");
     await refreshModelCatalog();
   }
 }
@@ -124,7 +126,7 @@ export async function refreshModelCatalog(): Promise<number> {
   };
 
   await fs.writeFile(MODELS_FILE, JSON.stringify(catalog, null, 2));
-  console.log(`[models] fetched and saved ${models.length} models`);
+  log.info("models", `fetched and saved ${models.length} models`);
   return models.length;
 }
 

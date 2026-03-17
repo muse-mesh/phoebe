@@ -14,6 +14,7 @@ import { bot } from "./instance.js";
 import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID } from "../config.js";
 import { getCatalogInfo } from "../models.js";
 import { getSkillCount } from "../tools.js";
+import log from "../logger.js";
 
 // ── Register all handlers ────────────────────────────────────────────────────
 // Import order matters: commands first (specific), then message handlers (general).
@@ -40,6 +41,6 @@ export async function notifyOwner(): Promise<void> {
         `Node: ${process.version}`,
     );
   } catch (err) {
-    console.warn("[phoebe] startup notification failed:", err);
+    log.warn("phoebe", "startup notification failed", { err: String(err) });
   }
 }

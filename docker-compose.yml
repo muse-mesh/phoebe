@@ -1,0 +1,17 @@
+services:
+  phoebe:
+    build: .
+    container_name: phoebe
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+      - SKILLS_DIR=/app/skills
+    volumes:
+      - phoebe-data:/app/data
+      - phoebe-skills:/app/skills
+
+volumes:
+  phoebe-data:
+  phoebe-skills:

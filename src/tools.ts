@@ -7,6 +7,8 @@ import path from "path";
 import { tool } from "ai";
 import { z } from "zod";
 import { SKILLS_DIR } from "./config.js";
+import log from "./logger.js";
+import { validateBashCommand, validateFilePath } from "./security.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,20 +25,19 @@ const MAX_OUTPUT = 50_000;
 const HOME = process.env.HOME ?? "/home/phoebe";
 const GLOBAL_SKILLS_DIR = path.join(HOME, ".agents", "skills");
 
-// ── Tool Labels ──────────────────────────────────────────────────────────────
+// ── Tool Action Callback ─────────────────────────────────────────────────────
+// Called by each tool execute() to notify the user what's happening.
+// Set by stream.ts before each request; cleared after.
 
-const LABELS: Record<string, string> = {
-  bash: "Running command",
-  readFile: "Reading file",
-  writeFile: "Writing file",
-  list_skills: "Listing skills",
-  activate_skill: "Activating skill",
-  search_skills: "Searching skills",
-  install_skill: "Installing skill",
-};
+type ToolActionCallback = (toolName: string, detail: string) => void;
+let _onToolAction: ToolActionCallback | null = null;
 
-export function toolLabel(name: string): string {
-  return LABELS[name] ?? `Using ${name}`;
+export function setToolActionCallback(cb: ToolActionCallback | null): void {
+  _onToolAction = cb;
+}
+
+function notifyToolAction(toolName: string, detail: string): void {
+  if (_onToolAction) _onToolAction(toolName, detail);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export async function discoverSkills(): Promise<SkillEntry[]> {
   // Then global ~/.agents/skills
   await scanSkillDir(GLOBAL_SKILLS_DIR, skillRegistry, seen);
 
-  console.log(`[skills] discovered ${skillRegistry.length} skills`);
+  log.info("skills", `discovered ${skillRegistry.length} skills`);
   return skillRegistry;
 }
 
@@ -170,20 +171,38 @@ export function buildTools() {
     }),
     execute: async ({ command, timeout, cwd }) => {
       if (!command) return "Error: no command provided";
-      console.log(
-        `[bash] ${command.slice(0, 200)}${command.length > 200 ? "..." : ""}`,
-      );
+
+      // Security check
+      const check = validateBashCommand(command);
+      if (!check.allowed) {
+        log.warn("security", `bash command blocked`, {
+          reason: check.reason,
+          command: command.slice(0, 200),
+        });
+        return `⛔ Security: ${check.reason}. This command is not allowed.`;
+      }
+
+      notifyToolAction("bash", command);
+      log.toolCall("bash", {
+        command,
+        ...(timeout ? { timeout } : {}),
+        ...(cwd ? { cwd } : {}),
+      });
+      const t0 = Date.now();
       const result = await execBash(command, {
         timeout: timeout ?? BASH_TIMEOUT,
         cwd,
       });
-      console.log(
-        `[bash] exit=${result.exitCode} out=${result.stdout.length}ch err=${result.stderr.length}ch`,
-      );
       let output = result.stdout;
       if (result.stderr)
         output += (output ? "\n" : "") + `STDERR:\n${result.stderr}`;
       if (result.exitCode !== 0) output += `\n(exit code: ${result.exitCode})`;
+      log.toolResult(
+        "bash",
+        result.exitCode === 0 ? "ok" : "error",
+        output || "(no output)",
+        Date.now() - t0,
+      );
       return output || "(no output)";
     },
   });
@@ -201,10 +220,23 @@ export function buildTools() {
       const resolved = path.isAbsolute(filePath)
         ? filePath
         : path.resolve(HOME, filePath);
-      console.log(`[readFile] ${resolved}`);
+
+      // Security check
+      const check = validateFilePath(resolved, "read");
+      if (!check.allowed) {
+        log.warn("security", `readFile blocked`, {
+          reason: check.reason,
+          path: resolved,
+        });
+        return `⛔ Security: ${check.reason}`;
+      }
+
+      notifyToolAction("readFile", resolved);
+      log.toolCall("readFile", { filePath: resolved });
       try {
+        const t0 = Date.now();
         const content = await fs.readFile(resolved, "utf-8");
-        console.log(`[readFile] ${content.length}ch`);
+        log.toolResult("readFile", "ok", content, Date.now() - t0);
         return truncate(content, MAX_OUTPUT);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -227,10 +259,29 @@ export function buildTools() {
       const resolved = path.isAbsolute(filePath)
         ? filePath
         : path.resolve(HOME, filePath);
-      console.log(`[writeFile] ${resolved} (${content.length}ch)`);
+
+      // Security check
+      const check = validateFilePath(resolved, "write");
+      if (!check.allowed) {
+        log.warn("security", `writeFile blocked`, {
+          reason: check.reason,
+          path: resolved,
+        });
+        return `⛔ Security: ${check.reason}`;
+      }
+
+      notifyToolAction("writeFile", `${resolved} (${content.length} chars)`);
+      log.toolCall("writeFile", { filePath: resolved, chars: content.length });
       try {
+        const t0 = Date.now();
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         await fs.writeFile(resolved, content, "utf-8");
+        log.toolResult(
+          "writeFile",
+          "ok",
+          `Wrote ${content.length} chars to ${resolved}`,
+          Date.now() - t0,
+        );
         return `Wrote ${content.length} chars to ${resolved}`;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -299,7 +350,9 @@ export function buildTools() {
           path.join(skill.path, "SKILL.md"),
           "utf-8",
         );
-        console.log(`[skills] activated: ${skill.name} (${content.length}ch)`);
+        log.info("skills", `activated: ${skill.name}`, {
+          chars: content.length,
+        });
         // Cap skill content to avoid overwhelming the context with huge instructions
         if (content.length > 3000) {
           content =
@@ -322,7 +375,8 @@ export function buildTools() {
     execute: async ({ query }) => {
       if (!query) return "Error: query required.";
       try {
-        console.log(`[skills] searching: ${query}`);
+        notifyToolAction("search_skills", query);
+        log.toolCall("search_skills", { query });
         const result = execSync(
           `npx -y skills find "${query}" 2>/dev/null || echo "Search completed"`,
           {
@@ -341,40 +395,57 @@ export function buildTools() {
 
   const install_skill = tool({
     description:
-      "Install a skill from GitHub or skills.sh. Example: 'anthropics/skills'.",
+      "Install a skill from skills.sh. Use owner/repo@skill format from search results (e.g. 'steipete/clawdis@weather').",
     inputSchema: z.object({
-      source: z.string().describe("GitHub owner/repo."),
-      skill_name: z
+      source: z
         .string()
-        .optional()
-        .describe("Specific skill name (optional)."),
+        .describe(
+          "Skill source in owner/repo@skill format (from search_skills results).",
+        ),
     }),
-    execute: async ({ source, skill_name }) => {
+    execute: async ({ source }) => {
       if (!source) return "Error: source required.";
+
+      // Normalise source: convert "owner/repo/skill" → "owner/repo@skill"
+      // The skills CLI requires @ to separate skill name from repo
+      const parts = source.split("/");
+      let normalised = source;
+      if (parts.length === 3 && !source.includes("@")) {
+        normalised = `${parts[0]}/${parts[1]}@${parts[2]}`;
+      }
+
       try {
-        let cmd = `npx -y skills add "${source}" --copy -y -g -a universal`;
-        if (skill_name) cmd += ` --skill "${skill_name}"`;
-        console.log(`[skills] installing: ${cmd}`);
+        const cmd = `npx -y skills add "${normalised}" --copy -y -g`;
+        notifyToolAction("install_skill", normalised);
+        log.toolCall("install_skill", { source: normalised, cmd });
         const result = execSync(cmd, {
-          timeout: 60000,
+          timeout: 120000,
           encoding: "utf-8",
           cwd: SKILLS_DIR,
           env: { ...process.env, CI: "1" },
         });
+        log.info("skills", `install output: ${result.trim().slice(0, 500)}`);
+        // Copy newly installed skills from global agents dir into our skills dir
         try {
           execSync(
-            `cp -rn ~/.agents/skills/*/ "${SKILLS_DIR}/" 2>/dev/null || true`,
-            {
-              encoding: "utf-8",
-              timeout: 5000,
-            },
+            `cp -rn ~/.agents/skills/* "${SKILLS_DIR}/" 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
           );
         } catch {}
         await discoverSkills();
         return `Done.\n${result.trim()}\n\n${skillRegistry.length} skills now installed.`;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return `Install failed: ${msg}`;
+        log.warn("skills", `install error: ${msg.slice(0, 500)}`);
+        // execSync throws on non-zero exit; try the copy fallback anyway
+        try {
+          execSync(
+            `cp -rn ~/.agents/skills/* "${SKILLS_DIR}/" 2>/dev/null || true`,
+            { encoding: "utf-8", timeout: 5000 },
+          );
+        } catch {}
+        await discoverSkills();
+        return `Install failed: ${msg}\n\n${skillRegistry.length} skills currently available.`;
       }
     },
   });

@@ -1,0 +1,8 @@
+node_modules
+.git
+data
+skills
+.env
+*.log
+dist
+.DS_Store
