@@ -60,6 +60,18 @@ Access thousands of AI models through [Mume AI](https://mume.ai), or run models 
 **Cloud models** connect through Mume AI — Gemini, Claude, GPT, Llama, and hundreds more.
 **Local models** run on your own GPU via Ollama — fully offline, zero API costs. Set `OLLAMA_BASE_URL` and local models appear in the catalog prefixed with `ollama/` (e.g. `ollama/llama3.2`, `ollama/qwen3:8b`).
 
+### Multi-Session Conversations
+
+Organise work into **named sessions** — each with its own conversation history and skills. Sessions persist across container restarts.
+
+- `/session` — list all sessions with inline keyboard for quick switching
+- `/session new [title]` — create a new session (auto-titled from first message if no title given)
+- `/session rename <title>` — rename the current session
+- `/session delete <id>` — delete a session
+- `/session <id>` — switch to a session by ID
+
+Legacy single-conversation files migrate automatically on first access.
+
 ### Telegram Interface
 
 Full-featured bot via [grammY](https://grammy.dev), with streaming typing indicators, inline tool transparency, tool result output, image/document understanding, and voice messages.
@@ -68,15 +80,15 @@ Full-featured bot via [grammY](https://grammy.dev), with streaming typing indica
 
 Seven built-in tools give the AI full agency inside the container:
 
-| Tool             | What it does                                                        |
-| ---------------- | ------------------------------------------------------------------- |
-| `bash`           | Run any shell command with full PATH (git, curl, python3, jq, etc.) |
-| `readFile`       | Read file contents                                                  |
-| `writeFile`      | Create or overwrite files, auto-creates parent directories          |
-| `list_skills`    | List installed Agent Skills                                         |
-| `activate_skill` | Load a skill's instructions into context                            |
-| `search_skills`  | Search the [skills.sh](https://skills.sh) registry                  |
-| `install_skill`  | Install a skill from the registry                                   |
+| Tool             | What it does                                                                     |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `bash`           | Run any shell command with full PATH. Background commands (`&`) handled safely.  |
+| `readFile`       | Read file contents                                                               |
+| `writeFile`      | Create or overwrite files, auto-creates parent directories                       |
+| `list_skills`    | List installed Agent Skills (session-scoped + shared + global)                   |
+| `activate_skill` | Load a skill's instructions into context                                         |
+| `search_skills`  | Search the [skills.sh](https://skills.sh) registry                               |
+| `install_skill`  | Install a skill from the registry (into active session's skills dir)             |
 
 Tool calls chain automatically — the model can call tools, inspect results, and call more tools, up to 25 steps per message (configurable).
 
@@ -102,7 +114,8 @@ Phoebe: [activates skill → follows SKILL.md instructions using bash/readFile/w
 
 - Full `ModelMessage` objects stored with tool-call and tool-result parts, exactly as they happened
 - Last 100 messages sent as context, last 30 keep full tool results, older results truncated to 10K chars
-- Conversations, user profiles, model preferences, and voice settings persist across container restarts via Docker volumes
+- Each session has its own isolated conversation history
+- Conversations, user profiles, model preferences, voice settings, and session indices persist across container restarts via Docker volumes
 
 ### Security
 
@@ -200,7 +213,7 @@ When set, Phoebe fetches your local model list and adds them to the catalog pref
 | Command           | Description                                                  |
 | ----------------- | ------------------------------------------------------------ |
 | `/start`          | Welcome message with feature overview                        |
-| `/status`         | Uptime, RAM, current model, skills count, conversation stats |
+| `/status`         | Uptime, RAM, current model, session, skills count            |
 | `/tools`          | List all available tools                                     |
 | `/skills`         | List installed Agent Skills                                  |
 | `/models`         | Browse all models (paginated, inline keyboard navigation)    |
@@ -208,10 +221,14 @@ When set, Phoebe fetches your local model list and adds them to the catalog pref
 | `/models <query>` | Search models by name or ID                                  |
 | `/model`          | Show current model with capabilities                         |
 | `/model <id>`     | Switch model (e.g. `/model anthropic/claude-sonnet-4.6`)     |
+| `/session`        | List sessions with inline keyboard for switching             |
+| `/session new`    | Create a new session (optional title)                        |
+| `/session rename` | Rename the current session                                   |
+| `/session delete` | Delete a session by ID                                       |
 | `/voice`          | Browse and switch TTS voice (21 voices)                      |
 | `/voicereply`     | Toggle voice replies on/off for current chat                 |
 | `/refreshmodels`  | Re-fetch model catalog from Mume AI                          |
-| `/clear`          | Clear conversation history for current chat                  |
+| `/clear`          | Clear conversation history for current session               |
 | `/restart`        | Graceful restart — owner only                                |
 
 ---
@@ -221,6 +238,8 @@ When set, Phoebe fetches your local model list and adds them to the catalog pref
 ### `bash`
 
 Run any shell command inside the container. Full login shell with `git`, `curl`, `wget`, `jq`, `python3`, `htop`, and more pre-installed. Output is truncated at 50,000 characters. Default timeout: 20 minutes.
+
+**Background commands:** Commands ending with `&` are detected and handled specially — the process is detached with proper FD management, and the tool returns the PID + a log file path immediately. The model can then check status (`ps -p PID`) or read output (`cat /tmp/phoebe_bg_*.log`) without the tool call hanging.
 
 ### `readFile` / `writeFile`
 
@@ -232,7 +251,7 @@ Browse installed skills and load their SKILL.md instructions into the AI's conte
 
 ### `search_skills` / `install_skill`
 
-Search and install from the 850+ skill [skills.sh](https://skills.sh) registry. Skills are installed to a persistent Docker volume and survive container restarts.
+Search and install from the 850+ skill [skills.sh](https://skills.sh) registry. Skills are installed to the active session's skills directory and survive container restarts. Each session has isolated skills — installing a skill in one session doesn't affect others.
 
 ---
 
@@ -253,10 +272,11 @@ description: Multi-step research with source verification
 
 When the AI calls `activate_skill`, the Markdown instructions (up to 3,000 chars) are injected into context. The model then follows them using the built-in tools. Skills compose naturally — a research skill can use bash to run curl, write results to files, and iterate.
 
-**Skill directories:**
+**Skill directories (priority order):**
 
-- `/app/skills/` — container-local skills (Docker volume, persistent)
-- `~/.agents/skills/` — global skills (npx default location)
+1. `/app/skills/sessions/<sessionId>/` — session-specific skills (highest priority)
+2. `/app/skills/` — shared skills (Docker volume, persistent)
+3. `~/.agents/skills/` — global skills (npx default location)
 
 ---
 
@@ -367,12 +387,13 @@ phoebe/
 │   │   └── telegram-channel.ts
 │   ├── bot/
 │   │   ├── instance.ts       # Bot singleton, provider, Markdown→HTML, sendChunked
-│   │   ├── commands.ts       # /command handlers + callback query handlers
+│   │   ├── commands.ts       # /command handlers + session management + callbacks
 │   │   ├── handlers.ts       # Text, photo, document, voice message handlers
-│   │   └── prompt.ts         # System prompt builder
+│   │   └── prompt.ts         # System prompt builder (session-aware)
 │   ├── persistence/
 │   │   ├── store.ts          # Low-level JSON read/write
-│   │   ├── conversations.ts  # Conversation history + context windowing
+│   │   ├── conversations.ts  # Session-scoped conversation history + context windowing
+│   │   ├── sessions.ts       # Multi-session management (CRUD, auto-title, migration)
 │   │   ├── settings.ts       # Per-chat model, voice, voice-reply settings
 │   │   └── users.ts          # User profiles
 ├── Dockerfile                # Node 22 slim + dev tools
@@ -384,15 +405,16 @@ phoebe/
 
 ### Persistent Data (Docker volume at `/app/data/`)
 
-| File                          | Contents                                              |
-| ----------------------------- | ----------------------------------------------------- |
-| `users.json`                  | User profiles (id, name, username, first/last seen)   |
-| `models.json`                 | Per-chat model overrides                              |
-| `voices.json`                 | Per-chat TTS voice preferences                        |
-| `voice-reply.json`            | Per-chat voice reply toggle                           |
-| `openrouter-models.json`      | Cached cloud model catalog (Mume AI)                  |
-| `ollama-models.json`          | Cached local model catalog (Ollama)                   |
-| `conversations/<chatId>.json` | Full conversation history per chat (max 500 messages) |
+| File                                          | Contents                                              |
+| --------------------------------------------- | ----------------------------------------------------- |
+| `users.json`                                   | User profiles (id, name, username, first/last seen)   |
+| `models.json`                                  | Per-chat model overrides                              |
+| `voices.json`                                  | Per-chat TTS voice preferences                        |
+| `voice-reply.json`                             | Per-chat voice reply toggle                           |
+| `openrouter-models.json`                       | Cached cloud model catalog (Mume AI)                  |
+| `ollama-models.json`                           | Cached local model catalog (Ollama)                   |
+| `sessions/<chatId>.json`                       | Session index per chat (active session, session list) |
+| `conversations/<chatId>_<sessionId>.json`      | Full conversation history per session (max 500 msgs)  |
 
 ---
 

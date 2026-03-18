@@ -17,6 +17,7 @@ This document covers the system design of Phoebe's AI agent, delivered through *
 - [Tool System](#tool-system)
 - [Agent Skills Lifecycle](#agent-skills-lifecycle)
 - [Conversation Memory & Windowing](#conversation-memory--windowing)
+- [Session Management](#session-management)
 - [Security Architecture](#security-architecture)
 - [Model Catalog](#model-catalog)
 - [Persistence Layer](#persistence-layer)
@@ -108,7 +109,7 @@ graph LR
 
     subgraph "Infrastructure"
         CONFIG["config.ts"]
-        PERSIST["persistence/<br/><i>conversations, users,<br/>settings, store</i>"]
+        PERSIST["persistence/<br/><i>conversations, sessions,<br/>users, settings, store</i>"]
         LOGGER["logger.ts"]
         ERRORS["errors.ts"]
     end
@@ -127,28 +128,29 @@ graph LR
     style INDEX fill:#FFA726,stroke:#E65100,color:#000
 ```
 
-### File Inventory (~3,200 lines of TypeScript)
+### File Inventory (~3,800 lines of TypeScript)
 
 | File                               | Lines | Role                                                        |
 | ---------------------------------- | ----: | ----------------------------------------------------------- |
-| `src/index.ts`                     |   131 | Entry point — env loading, init sequence, graceful shutdown |
-| `src/config.ts`                    |    43 | Environment variable resolution with defaults               |
+| `src/index.ts`                     |    92 | Entry point — env loading, init sequence, graceful shutdown |
+| `src/config.ts`                    |    35 | Environment variable resolution with defaults               |
 | `src/logger.ts`                    |   331 | Zero-dependency ANSI structured logging                     |
 | `src/models.ts`                    |   452 | Model catalog — fetch, cache, search, capabilities          |
-| `src/tools.ts`                     |   462 | All 7 AI-callable tools + Agent Skills registry             |
+| `src/tools.ts`                     |   520 | All 7 AI-callable tools + Agent Skills registry + bg cmds   |
 | `src/security.ts`                  |   228 | Bash command validation + file path protection              |
 | `src/stt.ts`                       |    88 | Speech-to-text via ElevenLabs Scribe V2 (fal.ai)            |
 | `src/tts.ts`                       |    72 | Text-to-speech via ElevenLabs Turbo v2.5 (fal.ai)           |
 | `src/errors.ts`                    |    21 | Error pattern → friendly message mapper                     |
-| `src/ai/stream.ts`                 |   310 | Interface-agnostic AI streaming engine                      |
-| `src/ai/channel.ts`                |    27 | OutputChannel interface definition                          |
+| `src/ai/stream.ts`                 |   325 | Interface-agnostic AI streaming engine (session-aware)      |
+| `src/ai/channel.ts`                |    30 | OutputChannel interface definition                          |
 | `src/ai/telegram-channel.ts`       |    85 | Telegram OutputChannel implementation                       |
 | `src/bot/instance.ts`              |   271 | Bot singleton, AI provider, Markdown→HTML, sendChunked      |
-| `src/bot/commands.ts`              |   322 | All `/command` handlers + inline keyboard callbacks         |
-| `src/bot/handlers.ts`              |   250 | Text, photo, document, voice message handlers               |
-| `src/bot/prompt.ts`                |    37 | System prompt builder                                       |
-| `src/persistence/store.ts`         |    25 | Low-level JSON read/write helpers                           |
-| `src/persistence/conversations.ts` |   168 | Conversation history with context windowing                 |
+| `src/bot/commands.ts`              |   440 | All `/command` + `/session` handlers + callbacks            |
+| `src/bot/handlers.ts`              |   270 | Text, photo, document, voice message handlers               |
+| `src/bot/prompt.ts`                |    46 | System prompt builder (session-aware)                       |
+| `src/persistence/store.ts`         |    26 | Low-level JSON read/write helpers                           |
+| `src/persistence/conversations.ts` |   180 | Session-scoped conversation history + context windowing     |
+| `src/persistence/sessions.ts`      |   294 | Multi-session CRUD, auto-title, migration, skill paths      |
 | `src/persistence/settings.ts`      |   117 | Per-chat model, voice, voice-reply settings                 |
 | `src/persistence/users.ts`         |    55 | User profile tracking                                       |
 
@@ -169,6 +171,8 @@ async function runAIStream(params: {
   tools: Record<string, Tool>; // Available tools
   maxSteps: number; // Tool call step limit
   abortSignal?: AbortSignal; // External cancellation
+  sessionSkillsDir?: string; // Per-session skills directory
+  sessionTitle?: string; // Session name for system prompt
 }): Promise<StreamResult>;
 ```
 
@@ -321,15 +325,15 @@ All tools are defined in `tools.ts` using the Vercel AI SDK `tool()` helper with
 
 ### Tool Definitions
 
-| #   | Tool             | Parameters                                            | Security                          | Output                                       |
-| --- | ---------------- | ----------------------------------------------------- | --------------------------------- | -------------------------------------------- |
-| 1   | `bash`           | `command: string`, `timeout?: number`, `cwd?: string` | `validateBashCommand()`           | stdout + stderr + exit code (50K char limit) |
+| #   | Tool             | Parameters                                            | Security                          | Output                                                      |
+| --- | ---------------- | ----------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| 1   | `bash`           | `command: string`, `timeout?: number`, `cwd?: string` | `validateBashCommand()`           | stdout + stderr + exit code (50K limit). Background: PID + log path |
 | 2   | `readFile`       | `filePath: string`                                    | `validateFilePath(path, "read")`  | File contents (50K char limit)               |
 | 3   | `writeFile`      | `filePath: string`, `content: string`                 | `validateFilePath(path, "write")` | Success/error message                        |
-| 4   | `list_skills`    | `filter?: string`                                     | None                              | Skill names + descriptions                   |
+| 4   | `list_skills`    | `filter?: string`                                     | None                              | Skill names + descriptions (session-scoped)  |
 | 5   | `activate_skill` | `name: string`                                        | None                              | SKILL.md content (3K char limit)             |
 | 6   | `search_skills`  | `query: string`                                       | None                              | Registry search results                      |
-| 7   | `install_skill`  | `source: string`                                      | None                              | Install confirmation                         |
+| 7   | `install_skill`  | `source: string`                                      | None                              | Install confirmation (to session skills dir) |
 
 ### Execution Flow
 
@@ -383,10 +387,13 @@ graph LR
 
 ### Skill Discovery
 
-On startup and on each `list_skills` call, Phoebe scans:
+On startup and on each `list_skills` call, Phoebe scans (in priority order):
 
-1. **Project-local** (`SKILLS_DIR` / `/app/skills/`) — takes priority
-2. **Global** (`~/.agents/skills/`) — npx default
+1. **Session-specific** (`skills/sessions/<sessionId>/`) — highest priority, isolated per session
+2. **Shared** (`SKILLS_DIR` / `/app/skills/`) — available to all sessions
+3. **Global** (`~/.agents/skills/`) — npx default
+
+The active session's skills directory is set per-request via `setSessionSkillsDir()` before any tool executes, and cleared after the request completes.
 
 Each subdirectory with a `SKILL.md` containing YAML frontmatter (`name`, `description`) is registered.
 
@@ -398,16 +405,16 @@ When the AI calls `activate_skill(name)`, the SKILL.md file is read (max 3,000 c
 
 ## Conversation Memory & Windowing
 
-Phoebe stores full `ModelMessage` objects including tool-call and tool-result parts.
+Phoebe stores full `ModelMessage` objects including tool-call and tool-result parts. Conversations are **session-scoped** — each session has its own isolated history.
 
 ### Storage
 
-| Constant                 |  Value | Purpose                                             |
-| ------------------------ | -----: | --------------------------------------------------- |
-| `MAX_DISK_MESSAGES`      |    500 | Maximum messages persisted to disk per conversation |
-| `MAX_CONTEXT_MESSAGES`   |    100 | Maximum messages sent to the model as context       |
-| `RECENT_FULL_TOOLS`      |     30 | Last N messages keep full tool result text          |
-| `MAX_TOOL_RESULT_LENGTH` | 10,000 | Truncation limit for older tool results             |
+| Constant                 |  Value | Purpose                                              |
+| ------------------------ | -----: | ---------------------------------------------------- |
+| `MAX_DISK_MESSAGES`      |    500 | Maximum messages persisted to disk per session        |
+| `MAX_CONTEXT_MESSAGES`   |    100 | Maximum messages sent to the model as context         |
+| `RECENT_FULL_TOOLS`      |     30 | Last N messages keep full tool result text            |
+| `MAX_TOOL_RESULT_LENGTH` | 10,000 | Truncation limit for older tool results               |
 
 ### Windowing Logic
 
@@ -433,6 +440,62 @@ When saving to disk, binary content is replaced with text placeholders:
 - Files → `[file: filename.ext]`
 
 This keeps conversation files JSON-serializable and reasonably sized.
+
+---
+
+## Session Management
+
+Phoebe supports multiple named conversation sessions per chat. Each session has isolated conversation history and skills.
+
+### Data Model
+
+```typescript
+interface Session {
+  id: string; // 8-char hex (crypto.randomBytes(4))
+  title: string; // Auto-generated or user-set
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+interface SessionIndex {
+  activeId: string; // Currently active session ID
+  sessions: Session[]; // All sessions for this chat
+}
+```
+
+### Storage
+
+- **Session index** — `data/sessions/<chatId>.json` — maps chat → sessions + active ID
+- **Conversations** — `data/conversations/<chatId>_<sessionId>.json` — history per session
+- **Skills** — `skills/sessions/<sessionId>/` — isolated skills per session
+
+### Auto-Titling
+
+Sessions with default names ("Session N" or "Default") are automatically titled when the first user message arrives. The title is the first 50 characters of the message, truncated at a word boundary.
+
+### Legacy Migration
+
+On first access, if a legacy `conversations/<chatId>.json` file exists (pre-session era), it's renamed to `conversations/<chatId>_<defaultSessionId>.json` and a session index is created with a "Default" session.
+
+### Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as Phoebe
+    participant S as Session Layer
+    participant C as Conversations
+
+    U->>P: Send message
+    P->>S: getActiveSession(chatId)
+    S->>S: Load/create session index
+    S-->>P: Session {id, title}
+    P->>S: autoTitleSession(chatId, sessionId, msg)
+    P->>C: addUserMessage(chatId, sessionId, content)
+    P->>P: runAIStream(sessionSkillsDir, sessionTitle)
+    P->>C: appendResponseMessages(chatId, sessionId, msgs)
+    P->>S: touchSession(chatId, sessionId)
+```
 
 ---
 
@@ -545,31 +608,34 @@ All state is stored as JSON files on disk in `DATA_DIR` (mounted as a Docker vol
 
 ### Files
 
-| File                          | Structure               | Purpose                                  |
-| ----------------------------- | ----------------------- | ---------------------------------------- |
-| `users.json`                  | `UserProfile[]`         | User ID, name, username, first/last seen |
-| `models.json`                 | `{ chatId: modelId }`   | Per-chat model override                  |
-| `voices.json`                 | `{ chatId: voiceName }` | Per-chat TTS voice preference            |
-| `voice-reply.json`            | `{ chatId: boolean }`   | Per-chat voice reply toggle              |
-| `openrouter-models.json`      | `AIModel[]`             | Cached cloud model catalog (Mume AI)     |
-| `ollama-models.json`          | `AIModel[]`             | Cached local model catalog (Ollama)      |
-| `conversations/{chatId}.json` | `ModelMessage[]`        | Full conversation history (max 500)      |
+| File                                     | Structure                 | Purpose                                  |
+| ---------------------------------------- | ------------------------- | ---------------------------------------- |
+| `users.json`                             | `UserProfile[]`           | User ID, name, username, first/last seen |
+| `models.json`                            | `{ chatId: modelId }`     | Per-chat model override                  |
+| `voices.json`                            | `{ chatId: voiceName }`   | Per-chat TTS voice preference            |
+| `voice-reply.json`                       | `{ chatId: boolean }`     | Per-chat voice reply toggle              |
+| `openrouter-models.json`                 | `AIModel[]`               | Cached cloud model catalog (Mume AI)     |
+| `ollama-models.json`                     | `AIModel[]`               | Cached local model catalog (Ollama)      |
+| `sessions/<chatId>.json`                 | `SessionIndex`            | Session list + active session per chat   |
+| `conversations/<chatId>_<sid>.json`      | `ModelMessage[]`          | Conversation history per session (max 500) |
 
 ### Init Sequence
 
 On startup, `index.ts` loads all persistence stores in order:
 
-1. Ensure data directory exists
+1. Ensure data directory exists (including `conversations/` and `sessions/` subdirs)
 2. Load users, models, voices, voice-reply settings
 3. Fetch/load model catalog
 4. Discover installed skills
 5. Start Telegram bot
 
+Session indices are loaded lazily on first access per chat (not at startup).
+
 ### Graceful Shutdown
 
 On `SIGINT` / `SIGTERM`:
 
-1. Call `persistAll()` — writes all in-memory state to disk
+1. Call `persistAll()` — writes all in-memory state to disk (conversations, session indices, settings, profiles)
 2. Stop Telegram bot
 3. Exit process
 
