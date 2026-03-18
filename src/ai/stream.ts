@@ -126,7 +126,9 @@ export async function runAIStream(opts: {
             // Also send any reasoning text that came with tool calls
             if (stepText) {
               log.block("ai", "thinking (with tools)", stepText, 400);
-              channel.sendText(stepText).catch(() => {});
+              channel.sendText(stepText).catch((e: unknown) => {
+                log.error("ai", "sendText (thinking) failed", {}, e);
+              });
               sentTextLength += (step.text ?? "").length;
             }
 
@@ -137,29 +139,31 @@ export async function runAIStream(opts: {
               ...(stepText ? { textLen: `${stepText.length}ch` } : {}),
             });
 
-            // Log each tool call's arguments and result from onStepFinish
-            const toolResults = step.toolResults ?? [];
+            // Log each tool call
             for (const tc of toolCalls) {
               log.toolCall(tc.toolName, (tc as any).args ?? {});
-              const tr = toolResults.find(
-                (r: any) => r.toolCallId === tc.toolCallId,
-              );
-              if (tr) {
-                const res = (tr as any).result;
-                const resultStr =
-                  res === undefined || res === null
-                    ? "(no result)"
-                    : typeof res === "string"
-                      ? res
-                      : (JSON.stringify(res, null, 2) ?? "(unserializable)");
-                log.toolResult(tc.toolName, "ok", resultStr, 0);
+            }
 
-                // Send tool result to the user so they see output even if
-                // the model responds with a lazy "(task completed)".
-                channel
-                  .sendToolResult(tc.toolName, resultStr)
-                  .catch(() => {});
-              }
+            // Send tool results to user so they see output even if
+            // the model responds with a lazy "(task completed)".
+            const toolResults: any[] = step.toolResults ?? [];
+
+            for (const tr of toolResults) {
+              const toolName: string = tr.toolName ?? "tool";
+              const res = tr.output ?? tr.result;
+              const resultStr =
+                res === undefined || res === null
+                  ? "(no result)"
+                  : typeof res === "string"
+                    ? res
+                    : (JSON.stringify(res, null, 2) ?? "(unserializable)");
+              log.toolResult(toolName, "ok", resultStr, 0);
+
+              channel
+                .sendToolResult(toolName, resultStr)
+                .catch((e: unknown) => {
+                  log.error("ai", "sendToolResult failed", { toolName }, e);
+                });
             }
           }
         } catch (stepErr) {
