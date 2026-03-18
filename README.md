@@ -215,7 +215,7 @@ To enable the browser UI via Firestore:
 | `/tools`          | List all available tools                                     |
 | `/skills`         | List installed Agent Skills                                  |
 | `/models`         | Browse all models (paginated, inline keyboard navigation)    |
-| `/models free`    | Show only free-tier models                                   |
+| `/models ollama`  | Show only local Ollama models                                |
 | `/models <query>` | Search models by name or ID                                  |
 | `/model`          | Show current model with capabilities                         |
 | `/model <id>`     | Switch model (e.g. `/model anthropic/claude-sonnet-4.6`)     |
@@ -231,7 +231,7 @@ To enable the browser UI via Firestore:
 
 ### `bash`
 
-Run any shell command inside the container. Full login shell with `git`, `curl`, `wget`, `jq`, `python3`, `htop`, and more pre-installed. Output is truncated at 50,000 characters. Default timeout: 120 seconds.
+Run any shell command inside the container. Full login shell with `git`, `curl`, `wget`, `jq`, `python3`, `htop`, and more pre-installed. Output is truncated at 50,000 characters. Default timeout: 20 minutes.
 
 ### `readFile` / `writeFile`
 
@@ -352,7 +352,7 @@ Phoebe has two interfaces that share a single AI streaming core:
 
 The `OutputChannel` interface decouples the AI engine from delivery:
 
-- **TelegramChannel** — sends typing indicators, chunked HTML messages, tool action labels, voice replies
+- **TelegramChannel** — sends typing indicators, chunked HTML messages, tool action labels, tool result output, voice replies
 - **FirestoreChannel** — writes streaming state to a Firestore status document (300ms throttle) for real-time web UI updates
 
 For the full architecture with Mermaid diagrams, data models, sequence diagrams, and security details, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -406,7 +406,8 @@ phoebe/
 | `models.json`                 | Per-chat model overrides                              |
 | `voices.json`                 | Per-chat TTS voice preferences                        |
 | `voice-reply.json`            | Per-chat voice reply toggle                           |
-| `openrouter-models.json`      | Cached model catalog                                  |
+| `openrouter-models.json`      | Cached cloud model catalog (Mume AI)                  |
+| `ollama-models.json`          | Cached local model catalog (Ollama)                   |
 | `conversations/<chatId>.json` | Full conversation history per chat (max 500 messages) |
 
 ---

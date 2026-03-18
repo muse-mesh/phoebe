@@ -158,24 +158,24 @@ graph LR
 
 | File                               | Lines | Role                                                        |
 | ---------------------------------- | ----: | ----------------------------------------------------------- |
-| `src/index.ts`                     |   117 | Entry point — env loading, init sequence, graceful shutdown |
-| `src/config.ts`                    |    38 | Environment variable resolution with defaults               |
+| `src/index.ts`                     |   131 | Entry point — env loading, init sequence, graceful shutdown |
+| `src/config.ts`                    |    43 | Environment variable resolution with defaults               |
 | `src/logger.ts`                    |   331 | Zero-dependency ANSI structured logging                     |
-| `src/models.ts`                    |   314 | Model catalog — fetch, cache, search, capabilities          |
+| `src/models.ts`                    |   452 | Model catalog — fetch, cache, search, capabilities          |
 | `src/tools.ts`                     |   462 | All 7 AI-callable tools + Agent Skills registry             |
 | `src/security.ts`                  |   228 | Bash command validation + file path protection              |
 | `src/stt.ts`                       |    88 | Speech-to-text via ElevenLabs Scribe V2 (fal.ai)            |
 | `src/tts.ts`                       |    72 | Text-to-speech via ElevenLabs Turbo v2.5 (fal.ai)           |
 | `src/errors.ts`                    |    21 | Error pattern → friendly message mapper                     |
 | `src/firestore.ts`                 |    80 | Firebase Admin SDK init + Firestore path helpers            |
-| `src/ai/stream.ts`                 |   304 | Interface-agnostic AI streaming engine                      |
-| `src/ai/channel.ts`                |    26 | OutputChannel interface definition                          |
-| `src/ai/telegram-channel.ts`       |    62 | Telegram OutputChannel implementation                       |
-| `src/ai/firestore-channel.ts`      |   133 | Firestore OutputChannel implementation                      |
-| `src/bot/instance.ts`              |   221 | Bot singleton, AI provider, Markdown→HTML, sendChunked      |
-| `src/bot/commands.ts`              |   290 | All `/command` handlers + inline keyboard callbacks         |
+| `src/ai/stream.ts`                 |   310 | Interface-agnostic AI streaming engine                      |
+| `src/ai/channel.ts`                |    27 | OutputChannel interface definition                          |
+| `src/ai/telegram-channel.ts`       |    85 | Telegram OutputChannel implementation                       |
+| `src/ai/firestore-channel.ts`      |   134 | Firestore OutputChannel implementation                      |
+| `src/bot/instance.ts`              |   271 | Bot singleton, AI provider, Markdown→HTML, sendChunked      |
+| `src/bot/commands.ts`              |   322 | All `/command` handlers + inline keyboard callbacks         |
 | `src/bot/handlers.ts`              |   250 | Text, photo, document, voice message handlers               |
-| `src/bot/prompt.ts`                |    33 | System prompt builder                                       |
+| `src/bot/prompt.ts`                |    37 | System prompt builder                                       |
 | `src/persistence/store.ts`         |    25 | Low-level JSON read/write helpers                           |
 | `src/persistence/conversations.ts` |   168 | Conversation history with context windowing                 |
 | `src/persistence/settings.ts`      |   117 | Per-chat model, voice, voice-reply settings                 |
@@ -240,8 +240,8 @@ sequenceDiagram
 
 | Behaviour               | Detail                                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
-| **Timeout**             | 15-minute hard limit per request. AbortController fires, partial text returned.          |
-| **Response collection** | 15-second grace period after stream ends to collect final `responseMessages`.            |
+| **Timeout**             | 30-minute hard limit per request. AbortController fires, partial text returned.          |
+| **Response collection** | 30-second grace period after stream ends to collect final `responseMessages`.            |
 | **Per-chat abort**      | New messages from the same chat abort in-flight requests via shared AbortController.     |
 | **Provider routing**    | Extracts provider slug from model ID → `order: [slug], allow_fallbacks: true`.           |
 | **Step limit**          | Configurable `MAX_STEPS` (default 25). Uses AI SDK's `stepCountIs()` stopping condition. |
@@ -260,6 +260,7 @@ classDiagram
         +sendTyping() Promise~void~
         +sendText(text: string) Promise~void~
         +sendToolAction(name: string, detail: string) Promise~void~
+        +sendToolResult(toolName: string, result: string) Promise~void~
         +onStreamChunk(text: string) void
         +onStreamDone(fullText: string) Promise~void~
         +sendVoice(audio: Buffer) Promise~void~
@@ -272,6 +273,7 @@ classDiagram
         +sendTyping() → sendChatAction("typing")
         +sendText() → sendChunked(Markdown→HTML)
         +sendToolAction() → monospaced inline msg
+        +sendToolResult() → HTML pre block (3.8K limit)
         +onStreamChunk() → no-op
         +onStreamDone() → sendChunked(full text)
         +sendVoice() → sendAudio
@@ -286,6 +288,7 @@ classDiagram
         +onStreamChunk() → throttled pendingText write
         +onStreamDone() → status{state:"idle", finalText}
         +sendToolAction() → status{state:"tool", toolLabel}
+        +sendToolResult() → append code block to pendingText
     }
 
     OutputChannel <|.. TelegramChannel : implements
@@ -296,7 +299,7 @@ classDiagram
 
 Adding a new interface (e.g. Slack, Discord, CLI) requires only:
 
-1. Implement `OutputChannel` (~60 lines)
+1. Implement `OutputChannel` (~70 lines)
 2. Wire it to the input source
 3. Call `runAIStream()` with your channel
 
@@ -330,8 +333,7 @@ sequenceDiagram
         AI-->>P: tool-call (e.g. bash)
         P->>P: Security validation
         P->>TG: "🔧 $ ls -la /app"
-        P->>P: Execute tool
-        P->>AI: Continue with tool result
+        P->>P: Execute tool        P->>TG: Tool result (pre-formatted output)        P->>AI: Continue with tool result
     end
 
     AI-->>P: Stream complete
@@ -351,7 +353,7 @@ sequenceDiagram
 - **No progressive message updates** — Telegram's edit rate limits make real-time streaming impractical. Instead, typing indicators are sent every 4 seconds while the AI works, and the full response is delivered at once.
 - **Smart message splitting** — `sendChunked()` splits at paragraph → line → word boundaries, respecting Telegram's 4,096-character limit per message.
 - **Markdown → HTML** — Converts AI markdown (bold, italic, code, links) to Telegram-compatible HTML.
-- **Tool transparency** — Each tool call is shown as an inline monospaced message (e.g. `$ git status`) so users see exactly what the AI is doing.
+- **Tool transparency** — Each tool call is shown as an inline monospaced message (e.g. `$ git status`) so users see exactly what the AI is doing. Tool results are also sent as pre-formatted HTML output.
 - **Media handling** — Photos, documents, and voice messages are downloaded (with 3 retries) and forwarded to the AI as multimodal content.
 
 ---
@@ -768,7 +770,7 @@ Phoebe supports two model sources: the Mume AI cloud gateway and local Ollama mo
 - **Unified catalog** — both sources are merged for queries, browsing, and search
 - **Ollama prefix** — local models are namespaced as `ollama/<model>` (e.g. `ollama/llama3.2`)
 - **Search** — keyword search across model names and IDs
-- **Free filter** — `/models free` shows only models with zero prompt + completion pricing (all Ollama models are free)
+- **Ollama filter** — `/models ollama` shows only local Ollama models
 - **Capabilities** — detects: tools, vision, audio input/output, image output, reasoning, structured output, web search, video input, file input
 - **Pagination** — inline keyboard navigation in Telegram (10 models per page)
 - **Price formatting** — displays cost per million tokens
