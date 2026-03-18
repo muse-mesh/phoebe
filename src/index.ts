@@ -19,6 +19,8 @@ import {
   DATA_DIR,
   SKILLS_DIR,
   BOT_TOKEN,
+  OLLAMA_BASE_URL,
+  isOllamaEnabled,
 } from "./config.js";
 import {
   ensureDataDir,
@@ -60,10 +62,15 @@ async function main(): Promise<void> {
       drop_pending_updates: true,
       onStart: async (botInfo) => {
         const catalogInfo = getCatalogInfo();
-        log.banner(`PHOEBE v2.0.0 — AI Telegram Bot`, {
+        const bannerFields: Record<string, string> = {
           bot: `@${botInfo.username} (${botInfo.id})`,
           model: DEFAULT_MODEL,
           gateway: MUME_BASE_URL,
+        };
+        if (isOllamaEnabled()) {
+          bannerFields.ollama = `${OLLAMA_BASE_URL} (${catalogInfo.ollamaCount} models)`;
+        }
+        Object.assign(bannerFields, {
           allowlist:
             ALLOWED_IDS.length === 0 ? "everyone" : ALLOWED_IDS.join(", "),
           data: DATA_DIR,
@@ -73,20 +80,27 @@ async function main(): Promise<void> {
           node: process.version,
           pid: String(process.pid),
         });
+        log.banner(`PHOEBE v2.0.0 — AI Telegram Bot`, bannerFields);
         await notifyOwner();
       },
     });
   } else {
     const catalogInfo = getCatalogInfo();
     log.warn("phoebe", "BOT_TOKEN not set — Telegram bot disabled");
-    log.banner(`PHOEBE v2.0.0 — Web-Only Mode`, {
+    const webBannerFields: Record<string, string> = {
       model: DEFAULT_MODEL,
       gateway: MUME_BASE_URL,
+    };
+    if (isOllamaEnabled()) {
+      webBannerFields.ollama = `${OLLAMA_BASE_URL} (${catalogInfo.ollamaCount} models)`;
+    }
+    Object.assign(webBannerFields, {
       models: `${catalogInfo.count} (fetched ${catalogInfo.fetchedAt})`,
       web: isFirestoreEnabled() ? "enabled" : "disabled",
       node: process.version,
       pid: String(process.pid),
     });
+    log.banner(`PHOEBE v2.0.0 — Web-Only Mode`, webBannerFields);
 
     // If no bot, keep the process alive for the web listener
     if (isFirestoreEnabled()) {

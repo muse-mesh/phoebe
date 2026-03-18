@@ -4,10 +4,16 @@
 
 import fs from "fs/promises";
 import path from "path";
-import { DATA_DIR, CATALOG_API_KEY } from "./config.js";
+import {
+  DATA_DIR,
+  CATALOG_API_KEY,
+  OLLAMA_BASE_URL,
+  isOllamaEnabled,
+} from "./config.js";
 import log from "./logger.js";
 
 const MODELS_FILE = path.join(DATA_DIR, "openrouter-models.json");
+const OLLAMA_MODELS_FILE = path.join(DATA_DIR, "ollama-models.json");
 const MUME_CATALOG_API = "https://openrouter.ai/api/v1";
 const PAGE_SIZE = 15;
 
@@ -48,28 +54,82 @@ interface ModelCatalog {
 // ── State ────────────────────────────────────────────────────────────────────
 
 let catalog: ModelCatalog | null = null;
+let ollamaCatalog: ModelCatalog | null = null;
 
 // ── Load / Refresh ───────────────────────────────────────────────────────────
 
 /** Load catalog from disk, or fetch from Mume AI if not cached. */
 export async function loadModelCatalog(): Promise<void> {
+  // Load Mume AI catalog from disk
   try {
     const raw = await fs.readFile(MODELS_FILE, "utf-8");
     catalog = JSON.parse(raw) as ModelCatalog;
-    log.info("models", `loaded ${catalog.models.length} models from disk`, {
-      fetched: catalog.fetchedAt,
-    });
+    log.info(
+      "models",
+      `loaded ${catalog.models.length} cloud models from disk`,
+      {
+        fetched: catalog.fetchedAt,
+      },
+    );
   } catch {
     if (!CATALOG_API_KEY) {
       log.warn(
         "models",
-        "no cached catalog and no CATALOG_API_KEY — catalog empty",
+        "no cached catalog and no CATALOG_API_KEY — cloud catalog empty",
       );
       catalog = { fetchedAt: "never", count: 0, models: [] };
-      return;
+    } else {
+      log.info("models", "no cached catalog, fetching from Mume AI…");
+      await refreshModelCatalog();
     }
-    log.info("models", "no cached catalog, fetching from Mume AI…");
-    await refreshModelCatalog();
+  }
+
+  // Load Ollama catalog from disk (if enabled)
+  if (isOllamaEnabled()) {
+    try {
+      const raw = await fs.readFile(OLLAMA_MODELS_FILE, "utf-8");
+      ollamaCatalog = JSON.parse(raw) as ModelCatalog;
+      log.info(
+        "models",
+        `loaded ${ollamaCatalog.models.length} Ollama models from disk`,
+        { fetched: ollamaCatalog.fetchedAt },
+      );
+    } catch {
+      log.info(
+        "models",
+        "no cached Ollama catalog, fetching from local server…",
+      );
+
+      // Retry with backoff — host.docker.internal DNS may not be ready
+      // immediately when the container starts.
+      const maxAttempts = 4;
+      let loaded = false;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          await refreshOllamaModels();
+          loaded = true;
+          break;
+        } catch (err) {
+          log.warn(
+            "models",
+            `Ollama fetch attempt ${attempt}/${maxAttempts} failed`,
+            {
+              err: (err as Error).message,
+            },
+          );
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, attempt * 2000));
+          }
+        }
+      }
+      if (!loaded) {
+        log.warn(
+          "models",
+          "Ollama unreachable after retries — will retry on /refreshmodels",
+        );
+        ollamaCatalog = { fetchedAt: "never", count: 0, models: [] };
+      }
+    }
   }
 }
 
@@ -130,18 +190,95 @@ export async function refreshModelCatalog(): Promise<number> {
   return models.length;
 }
 
+// ── Ollama ───────────────────────────────────────────────────────────────────
+
+/** Fetch local models from Ollama and save to disk. */
+export async function refreshOllamaModels(): Promise<number> {
+  if (!isOllamaEnabled()) {
+    throw new Error("Ollama is not configured (set OLLAMA_BASE_URL)");
+  }
+
+  const baseUrl = OLLAMA_BASE_URL.replace(/\/+$/, "");
+  const res = await fetch(`${baseUrl}/api/tags`);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Ollama API error ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = (await res.json()) as { models?: any[] };
+
+  const models: AIModel[] = (data.models ?? []).map((m: any) => {
+    const sizeGB = m.size ? (m.size / 1_073_741_824).toFixed(1) : "?";
+    const paramCount = m.details?.parameter_size ?? "";
+    const quant = m.details?.quantization_level ?? "";
+    const family = m.details?.family ?? "";
+
+    return {
+      id: `ollama/${m.name ?? m.model}`,
+      name: `${m.name ?? m.model} (${paramCount}${quant ? " " + quant : ""})`,
+      created: m.modified_at
+        ? Math.floor(new Date(m.modified_at).getTime() / 1000)
+        : 0,
+      description:
+        `Local Ollama model — ${family} ${paramCount} ${quant} — ${sizeGB}GB on disk`.trim(),
+      context_length: null, // Ollama doesn't expose this in /api/tags
+      pricing: { prompt: "0", completion: "0" },
+      architecture: {
+        input_modalities: m.details?.families?.includes("clip")
+          ? ["text", "image"]
+          : ["text"],
+        output_modalities: ["text"],
+        tokenizer: family || undefined,
+        instruct_type: null,
+      },
+      supported_parameters: ["tools", "temperature", "top_p", "top_k"],
+      top_provider: {
+        context_length: null,
+        max_completion_tokens: null,
+        is_moderated: false,
+      },
+    };
+  });
+
+  ollamaCatalog = {
+    fetchedAt: new Date().toISOString(),
+    count: models.length,
+    models,
+  };
+
+  await fs.writeFile(
+    OLLAMA_MODELS_FILE,
+    JSON.stringify(ollamaCatalog, null, 2),
+  );
+  log.info("models", `fetched and saved ${models.length} Ollama models`);
+  return models.length;
+}
+
 // ── Queries ──────────────────────────────────────────────────────────────────
+
+/** All models from both catalogs merged. Ollama models appear first. */
+function allModels(): AIModel[] {
+  const ollama = ollamaCatalog?.models ?? [];
+  const cloud = catalog?.models ?? [];
+  return [...ollama, ...cloud];
+}
 
 /** All models in the catalog. */
 export function getModels(): AIModel[] {
-  return catalog?.models ?? [];
+  return allModels();
 }
 
 /** When the catalog was last fetched. */
-export function getCatalogInfo(): { fetchedAt: string; count: number } {
+export function getCatalogInfo(): {
+  fetchedAt: string;
+  count: number;
+  ollamaCount: number;
+} {
   return {
     fetchedAt: catalog?.fetchedAt ?? "never",
-    count: catalog?.models.length ?? 0,
+    count: (catalog?.models.length ?? 0) + (ollamaCatalog?.models.length ?? 0),
+    ollamaCount: ollamaCatalog?.models.length ?? 0,
   };
 }
 
@@ -156,7 +293,7 @@ export function getModelsPage(
   total: number;
 } {
   const pageSize = options?.pageSize ?? PAGE_SIZE;
-  let models = [...(catalog?.models ?? [])];
+  let models = [...allModels()];
 
   if (options?.filter) {
     const lower = options.filter.toLowerCase();
@@ -194,7 +331,7 @@ export function getModelsPage(
 /** Find model by ID or partial match. */
 export function findModel(query: string): AIModel | undefined {
   const lower = query.trim().toLowerCase();
-  const models = catalog?.models ?? [];
+  const models = allModels();
 
   const exact = models.find((m) => m.id.toLowerCase() === lower);
   if (exact) return exact;
@@ -205,9 +342,9 @@ export function findModel(query: string): AIModel | undefined {
   return models.find((m) => m.name.toLowerCase().includes(lower));
 }
 
-/** Get only free models. */
+/** Get only free models (includes all Ollama models). */
 export function getFreeModels(): AIModel[] {
-  return (catalog?.models ?? []).filter(
+  return allModels().filter(
     (m) =>
       parseFloat(m.pricing.prompt) === 0 &&
       parseFloat(m.pricing.completion) === 0,
@@ -236,7 +373,7 @@ export type ModelFeature =
 
 /** Check whether a model supports a given feature. */
 export function modelSupports(modelId: string, feature: ModelFeature): boolean {
-  const model = (catalog?.models ?? []).find((m) => m.id === modelId);
+  const model = allModels().find((m) => m.id === modelId);
   if (!model) return false;
 
   switch (feature) {
@@ -267,7 +404,7 @@ export function modelSupports(modelId: string, feature: ModelFeature): boolean {
 
 /** Get a summary of model capabilities as labels. */
 export function getModelCapabilities(modelId: string): string[] {
-  const model = (catalog?.models ?? []).find((m) => m.id === modelId);
+  const model = allModels().find((m) => m.id === modelId);
   if (!model) return [];
 
   const caps: string[] = [];

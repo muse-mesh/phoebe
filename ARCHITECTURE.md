@@ -56,6 +56,11 @@ graph TB
         MODELS["Gemini / Claude / GPT / Llama / ..."]
     end
 
+    subgraph "Local Inference (Optional)"
+        OLLAMA["Ollama Server"]
+        LOCAL["Local Models<br/>(llama3.2 / qwen3 / phi4 / ...)"]
+    end
+
     TG <-->|"Bot API"| TGBOT
     WEB <-->|"onSnapshot<br/>(real-time sync)"| FS
     FS <-->|"firebase-admin<br/>(onSnapshot + writes)"| LISTENER
@@ -64,6 +69,8 @@ graph TB
     TGBOT --> AI
     AI <-->|"streamText()"| OR
     OR --> MODELS
+    AI <-->|"OpenAI-compatible /v1"| OLLAMA
+    OLLAMA --> LOCAL
     AI --> TOOLS
     AI --> PERSIST
 
@@ -71,6 +78,7 @@ graph TB
     style AI fill:#42A5F5,stroke:#1565C0,color:#000
     style WEB fill:#66BB6A,stroke:#2E7D32,color:#000
     style TG fill:#29B6F6,stroke:#0277BD,color:#000
+    style OLLAMA fill:#AB47BC,stroke:#6A1B9A,color:#FFF
 ```
 
 **Key design principle:** The AI engine knows nothing about Telegram or Firestore. It talks to an `OutputChannel` interface. This lets us add new delivery channels (Slack, Discord, CLI, etc.) without touching the AI core.
@@ -751,16 +759,26 @@ graph TB
 
 ## Model Catalog
 
-Phoebe fetches the full model catalog via the Mume AI gateway and caches it locally.
+Phoebe supports two model sources: the Mume AI cloud gateway and local Ollama models. Both catalogs are fetched and cached independently.
 
 ### Features
 
-- **Fetch & cache** — full catalog fetched from Mume AI, saved to `openrouter-models.json`
+- **Dual sources** — cloud models from Mume AI + local models from Ollama (when `OLLAMA_BASE_URL` is set)
+- **Fetch & cache** — cloud catalog saved to `openrouter-models.json`, Ollama catalog to `ollama-models.json`
+- **Unified catalog** — both sources are merged for queries, browsing, and search
+- **Ollama prefix** — local models are namespaced as `ollama/<model>` (e.g. `ollama/llama3.2`)
 - **Search** — keyword search across model names and IDs
-- **Free filter** — `/models free` shows only models with zero prompt + completion pricing
+- **Free filter** — `/models free` shows only models with zero prompt + completion pricing (all Ollama models are free)
 - **Capabilities** — detects: tools, vision, audio input/output, image output, reasoning, structured output, web search, video input, file input
 - **Pagination** — inline keyboard navigation in Telegram (10 models per page)
 - **Price formatting** — displays cost per million tokens
+
+### Provider Routing
+
+When the user sends a message, `resolveProvider(modelId)` in `instance.ts` routes to the correct backend:
+
+- Models starting with `ollama/` → local Ollama server via `@ai-sdk/openai-compatible` (OpenAI-compatible `/v1` endpoint)
+- All other models → Mume AI gateway via `@openrouter/ai-sdk-provider`
 
 ### Capability Detection
 
@@ -791,7 +809,8 @@ All state is stored as JSON files on disk in `DATA_DIR` (mounted as a Docker vol
 | `models.json`                 | `{ chatId: modelId }`   | Per-chat model override                  |
 | `voices.json`                 | `{ chatId: voiceName }` | Per-chat TTS voice preference            |
 | `voice-reply.json`            | `{ chatId: boolean }`   | Per-chat voice reply toggle              |
-| `openrouter-models.json`      | `AIModel[]`             | Cached model catalog (via Mume AI)       |
+| `openrouter-models.json`      | `AIModel[]`             | Cached cloud model catalog (Mume AI)     |
+| `ollama-models.json`          | `AIModel[]`             | Cached local model catalog (Ollama)      |
 | `conversations/{chatId}.json` | `ModelMessage[]`        | Full conversation history (max 500)      |
 
 ### Init Sequence
@@ -901,6 +920,7 @@ The Docker image is built on `node:22-slim` with additional tools:
 | Execution         | tsx (no build step)                   | 4.19    |
 | AI Engine         | Vercel AI SDK                         | 6.0     |
 | AI Gateway        | Mume AI (@openrouter/ai-sdk-provider) | 2.2     |
+| Local Models      | Ollama (@ai-sdk/openai-compatible)    | 2.0     |
 | Telegram          | grammY                                | 1.35    |
 | Schema Validation | Zod                                   | 3.25    |
 | Firestore         | firebase-admin                        | 13.6    |

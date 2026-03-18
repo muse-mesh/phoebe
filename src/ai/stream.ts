@@ -6,7 +6,7 @@ import type { ModelMessage, UserContent } from "ai";
 import { buildTools, setToolActionCallback } from "../tools.js";
 import { formatError } from "../errors.js";
 import { buildPrompt } from "../bot/prompt.js";
-import { provider } from "../bot/instance.js";
+import { resolveProvider } from "../bot/instance.js";
 import { MAX_STEPS } from "../config.js";
 import type { OutputChannel } from "./channel.js";
 import log from "../logger.js";
@@ -103,17 +103,8 @@ export async function runAIStream(opts: {
 
   let result;
   try {
-    // Route directly to the model's native provider for lower latency.
-    // e.g. "anthropic/claude-sonnet-4.6" → order: ["anthropic"]
-    const providerSlug = modelId.split("/")[0];
-
     result = streamText({
-      model: provider(modelId, {
-        provider: {
-          order: [providerSlug],
-          allow_fallbacks: true,
-        },
-      }),
+      model: resolveProvider(modelId),
       system: systemPrompt,
       messages: contextMessages,
       tools,

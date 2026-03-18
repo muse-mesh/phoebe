@@ -15,7 +15,7 @@
 
 **A self-hosted AI agent with full tool access — delivered through Telegram and the web.**
 
-Phoebe runs in a Docker container on your own hardware. She connects to any model on [Mume AI](https://mume.ai) (Gemini, Claude, GPT, Llama, etc.), has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io). Conversations stream in real-time to Telegram and to a browser UI via Firestore.
+Phoebe runs in a Docker container on your own hardware. She connects to any model on [Mume AI](https://mume.ai) (Gemini, Claude, GPT, Llama, etc.) or to your local [Ollama](https://ollama.com) server, has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io). Conversations stream in real-time to Telegram and to a browser UI via Firestore.
 
 No vendor lock-in. No cloud dependency. One `docker compose up` and you're running.
 
@@ -55,7 +55,10 @@ No vendor lock-in. No cloud dependency. One `docker compose up` and you're runni
 
 ### Multi-Model Support
 
-Access thousands of AI models through [Mume AI](https://mume.ai). Switch models mid-conversation with `/model <id>`. Browse the full catalog with `/models`, filter by name or free tier, and paginate with inline keyboard navigation. Each model's capabilities (tools, vision, audio, reasoning, etc.) are detected and displayed.
+Access thousands of AI models through [Mume AI](https://mume.ai), or run models locally with [Ollama](https://ollama.com). Switch models mid-conversation with `/model <id>`. Browse the full catalog with `/models`, filter by name or free tier, and paginate with inline keyboard navigation. Each model's capabilities (tools, vision, audio, reasoning, etc.) are detected and displayed.
+
+**Cloud models** connect through Mume AI — Gemini, Claude, GPT, Llama, and hundreds more.
+**Local models** run on your own GPU via Ollama — fully offline, zero API costs. Set `OLLAMA_BASE_URL` and local models appear in the catalog prefixed with `ollama/` (e.g. `ollama/llama3.2`, `ollama/qwen3:8b`).
 
 ### Dual Interface
 
@@ -168,6 +171,20 @@ You should see Phoebe connect to Telegram and report her status to the owner.
 | `MAX_STEPS`       | `25`                            | Max tool-call steps per message                        |
 | `ALLOWED_IDS`     | _(empty = everyone)_            | Comma-separated Telegram user IDs for access control   |
 | `FAL_KEY`         | —                               | [fal.ai](https://fal.ai) API key for voice (STT + TTS) |
+
+### Ollama (Optional — Local Models)
+
+Run models locally with zero API costs. Install [Ollama](https://ollama.com), pull models, and set the base URL:
+
+| Variable          | Default | Description                                                             |
+| ----------------- | ------- | ----------------------------------------------------------------------- |
+| `OLLAMA_BASE_URL` | —       | Ollama server URL (e.g. `http://host.docker.internal:11434` for Docker) |
+
+When set, Phoebe fetches your local model list and adds them to the catalog prefixed with `ollama/`. Switch to a local model with `/model ollama/llama3.2`.
+
+> **Docker networking:**
+> - **Same machine:** Use `http://host.docker.internal:11434` to reach Ollama on the Docker host (macOS/Windows). On Linux, add `--add-host=host.docker.internal:host-gateway` to `docker-compose.yml`.
+> - **Remote GPU machine:** Point to the LAN IP directly (e.g. `http://192.168.1.100:11434`). On the Ollama machine, set `OLLAMA_HOST=0.0.0.0` so it listens on all interfaces, then no Docker DNS tricks are needed.
 
 ### Web Interface (Optional)
 
@@ -433,6 +450,7 @@ pnpm typecheck          # tsc --noEmit
 | `grammy`                      | Telegram bot framework                                |
 | `ai`                          | Vercel AI SDK — `streamText`, `tool()`, message types |
 | `@openrouter/ai-sdk-provider` | AI provider SDK (Mume AI gateway)                     |
+| `@ai-sdk/openai-compatible`    | OpenAI-compatible provider (Ollama local models)      |
 | `zod`                         | Schema validation for tool parameters                 |
 | `firebase-admin`              | Firestore server-side SDK                             |
 | `dotenv`                      | Environment variable loading                          |

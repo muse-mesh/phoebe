@@ -3,7 +3,12 @@
 
 import fs from "fs/promises";
 import { InlineKeyboard } from "grammy";
-import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID } from "../config.js";
+import {
+  DEFAULT_MODEL,
+  MAX_STEPS,
+  OWNER_ID,
+  CATALOG_API_KEY,
+} from "../config.js";
 import {
   trackUser,
   getChatModel,
@@ -25,6 +30,7 @@ import {
   resolveModelId,
   getModelsPage,
   refreshModelCatalog,
+  refreshOllamaModels,
   getCatalogInfo,
   findModel,
   formatPrice,
@@ -32,8 +38,9 @@ import {
   getModelCapabilities,
 } from "../models.js";
 import { getSkillCount, discoverSkills } from "../tools.js";
-import { bot, startedAt } from "./instance.js";
+import { bot, startedAt, isOllamaModel } from "./instance.js";
 import { toolNames } from "./handlers.js";
+import { isOllamaEnabled } from "../config.js";
 import log from "../logger.js";
 
 // ── Model Browsing Helpers ───────────────────────────────────────────────────
@@ -115,14 +122,18 @@ export function registerCommands() {
     const rss = (mem.rss / 1024 / 1024).toFixed(1);
     const heap = (mem.heapUsed / 1024 / 1024).toFixed(1);
     const currentModel = getChatModel(ctx.chat.id);
+    const catalogInfo = getCatalogInfo();
+    const ollamaLine = isOllamaEnabled()
+      ? `\nOllama: ${catalogInfo.ollamaCount} local models`
+      : "";
     return ctx.reply(
       `Phoebe Status\n` +
         `Uptime: ${h}h ${m}m ${s}s\n` +
         `RAM: ${rss}MB RSS / ${heap}MB heap\n` +
         `Node: ${process.version}\n` +
-        `Model: ${currentModel}\n` +
+        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : ""}\n` +
         `Voice Reply: ${isVoiceReplyEnabled(ctx.chat.id) ? "on" : "off"}\n` +
-        `Catalog: ${getCatalogInfo().count} models\n` +
+        `Catalog: ${catalogInfo.count} models${ollamaLine}\n` +
         `Tools: ${toolNames.length}\n` +
         `Skills: ${getSkillCount()}\n` +
         `Max steps: ${MAX_STEPS}\n` +
@@ -205,9 +216,29 @@ export function registerCommands() {
 
   bot.command("refreshmodels", async (ctx) => {
     try {
-      await ctx.reply("Refreshing model catalog from Mume AI...");
-      const count = await refreshModelCatalog();
-      return ctx.reply(`Model catalog updated: ${count} models.`);
+      const parts: string[] = [];
+
+      // Refresh cloud catalog
+      if (CATALOG_API_KEY) {
+        await ctx.reply("Refreshing model catalog from Mume AI...");
+        const count = await refreshModelCatalog();
+        parts.push(`Cloud: ${count} models`);
+      }
+
+      // Refresh Ollama models
+      if (isOllamaEnabled()) {
+        await ctx.reply("Refreshing local models from Ollama...");
+        const count = await refreshOllamaModels();
+        parts.push(`Ollama: ${count} local models`);
+      }
+
+      if (parts.length === 0) {
+        return ctx.reply(
+          "No model sources configured.\nSet MUME_API_KEY for cloud models or OLLAMA_BASE_URL for local models.",
+        );
+      }
+
+      return ctx.reply(`Model catalog updated.\n${parts.join("\n")}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return ctx.reply(`Failed to refresh models: ${msg}`);

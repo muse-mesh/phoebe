@@ -4,7 +4,10 @@
 
 export {
   bot,
-  provider,
+  mumeProvider,
+  ollamaProvider,
+  resolveProvider,
+  isOllamaModel,
   startedAt,
   sendChunked,
   downloadTelegramFile,
