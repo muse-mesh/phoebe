@@ -20,7 +20,7 @@ interface SkillEntry {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const BASH_TIMEOUT = 120_000;
+const BASH_TIMEOUT = 20 * 60 * 1000; // 20 minutes per command
 const MAX_OUTPUT = 50_000;
 const HOME = process.env.HOME ?? "/home/phoebe";
 const GLOBAL_SKILLS_DIR = path.join(HOME, ".agents", "skills");
@@ -166,7 +166,7 @@ export function buildTools() {
       timeout: z
         .number()
         .optional()
-        .describe("Timeout in ms (default: 120000)."),
+        .describe("Timeout in ms (default: 1200000 / 20 min)."),
       cwd: z.string().optional().describe("Working directory (default: home)."),
     }),
     execute: async ({ command, timeout, cwd }) => {

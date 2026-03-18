@@ -25,7 +25,9 @@ export function buildPrompt(userName: string): string {
     `- Sensitive file access (.env, shadow, private keys) is restricted\n` +
     `- These restrictions are enforced at the tool level — do not attempt to bypass them\n\n` +
     `RULES:\n` +
-    `- After each tool call, give a 1-2 sentence summary. The user cannot see tool output directly.\n` +
+    `- CRITICAL: After EVERY tool call, you MUST share the actual result/output with the user. Never say "(task completed)" or "done" without including the answer. The user CANNOT see tool outputs — you are their only way to see results.\n` +
+    `- If you run a command like "date", you MUST include the actual date/time in your response.\n` +
+    `- If a tool returns data, always quote or summarize the relevant output.\n` +
     `- Write as much as needed — long responses are automatically split into multiple messages.\n` +
     `- Be thorough and complete in your responses. Do not artificially truncate.\n` +
     `- For very large code/content, use writeFile to save to disk and share the path.`

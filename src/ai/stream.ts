@@ -13,8 +13,8 @@ import log from "../logger.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const STREAM_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes per request
-const RESPONSE_COLLECT_TIMEOUT_MS = 15_000; // 15s max to collect response after stream ends
+const STREAM_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per request
+const RESPONSE_COLLECT_TIMEOUT_MS = 30_000; // 30s max to collect response after stream ends
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
