@@ -17,6 +17,10 @@ import {
   addAssistantMessage,
   appendResponseMessages,
   isVoiceReplyEnabled,
+  getActiveSession,
+  autoTitleSession,
+  touchSession,
+  sessionSkillsPath,
 } from "../persistence/index.js";
 import { buildTools } from "../tools.js";
 import { bot, downloadTelegramFile } from "./instance.js";
@@ -58,24 +62,51 @@ export async function handleAIMessage(
   inflightRequests.set(chatId, abortController);
 
   try {
-    await addUserMessage(chatId, userContent);
+    // Resolve active session
+    const session = await getActiveSession(chatId);
+    const sessionId = session.id;
+
+    // Auto-title session from first user message
+    let textPreview = "";
+    if (typeof userContent === "string") {
+      textPreview = userContent;
+    } else if (Array.isArray(userContent)) {
+      textPreview = userContent
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join(" ");
+    }
+    if (textPreview) {
+      await autoTitleSession(chatId, sessionId, textPreview);
+    }
+
+    await addUserMessage(chatId, sessionId, userContent);
 
     const result = await runAIStream({
       channel,
       modelId: getChatModel(chatId),
       userName,
-      contextMessages: await getContextMessages(chatId),
+      contextMessages: await getContextMessages(chatId, sessionId),
       userContent,
       abortSignal: abortController.signal,
+      sessionSkillsDir: sessionSkillsPath(sessionId),
+      sessionTitle: session.title,
     });
 
     // Persist response messages
     if (result.responseMessages.length > 0) {
-      await appendResponseMessages(chatId, result.responseMessages);
+      await appendResponseMessages(chatId, sessionId, result.responseMessages);
     }
     if (result.timedOut) {
-      await addAssistantMessage(chatId, "(timed out - task incomplete)");
+      await addAssistantMessage(
+        chatId,
+        sessionId,
+        "(timed out - task incomplete)",
+      );
     }
+
+    // Touch session updatedAt
+    await touchSession(chatId, sessionId);
 
     // Voice reply: only if user enabled it and sent a voice message
     const remainingText = result.fullText.trim();

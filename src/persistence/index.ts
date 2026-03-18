@@ -31,6 +31,7 @@ export type { TTSVoice } from "./settings.js";
 
 export {
   conversations,
+  convKey,
   convPath,
   getContextMessages,
   addUserMessage,
@@ -38,9 +39,27 @@ export {
   addAssistantMessage,
 } from "./conversations.js";
 
+export {
+  getSessionIndex,
+  getActiveSession,
+  getActiveSessionId,
+  createSession,
+  switchSession,
+  renameSession,
+  deleteSession,
+  listSessions,
+  autoTitleSession,
+  touchSession,
+  sessionSkillsPath,
+  ensureSessionSkillsDir,
+  saveAllSessionIndices,
+} from "./sessions.js";
+export type { Session, SessionIndex } from "./sessions.js";
+
 // ── Persist All ──────────────────────────────────────────────────────────────
 
 import { conversations, saveConversation } from "./conversations.js";
+import { saveAllSessionIndices } from "./sessions.js";
 import {
   saveChatModels,
   saveChatVoices,
@@ -49,9 +68,15 @@ import {
 import { saveUserProfiles } from "./users.js";
 
 export async function persistAll(): Promise<void> {
-  for (const chatId of conversations.keys()) {
-    await saveConversation(chatId).catch(() => {});
+  // Save all loaded session conversations
+  for (const key of conversations.keys()) {
+    const idx = key.indexOf("_");
+    if (idx === -1) continue;
+    const chatId = Number(key.slice(0, idx));
+    const sessionId = key.slice(idx + 1);
+    await saveConversation(chatId, sessionId).catch(() => {});
   }
+  await saveAllSessionIndices().catch(() => {});
   await saveChatModels().catch(() => {});
   await saveChatVoices().catch(() => {});
   await saveChatVoiceReply().catch(() => {});

@@ -1,6 +1,7 @@
 // ── Conversation History ─────────────────────────────────────────────────────
-// Stores full ModelMessage objects (including tool-call + tool-result parts).
-// Messages are NEVER deleted from disk — we append and cap at MAX_DISK_MESSAGES.
+// Session-aware conversation persistence. Each conversation is identified
+// by (chatId, sessionId). Messages are NEVER deleted from disk — we append
+// and cap at MAX_DISK_MESSAGES.
 // For the model context window we slice the last MAX_CONTEXT_MESSAGES and
 // truncate old tool results outside the RECENT_FULL_TOOLS window.
 
@@ -25,11 +26,16 @@ export const RECENT_FULL_TOOLS = 30;
 const MAX_TOOL_RESULT_LENGTH = 10_000;
 
 // ── State ────────────────────────────────────────────────────────────────────
+// Key: "chatId_sessionId"
 
-export const conversations = new Map<number, ModelMessage[]>();
+export const conversations = new Map<string, ModelMessage[]>();
 
-export function convPath(chatId: number): string {
-  return path.join(DATA_DIR, "conversations", `${chatId}.json`);
+export function convKey(chatId: number, sessionId: string): string {
+  return `${chatId}_${sessionId}`;
+}
+
+export function convPath(chatId: number, sessionId: string): string {
+  return path.join(DATA_DIR, "conversations", `${chatId}_${sessionId}.json`);
 }
 
 // ── Migration ────────────────────────────────────────────────────────────────
@@ -46,16 +52,24 @@ function migrateMessage(msg: any): ModelMessage {
 
 // ── Load / Save ──────────────────────────────────────────────────────────────
 
-async function loadConversation(chatId: number): Promise<ModelMessage[]> {
-  if (conversations.has(chatId)) return conversations.get(chatId)!;
-  const data = await loadJSON<unknown[]>(convPath(chatId));
+async function loadConversation(
+  chatId: number,
+  sessionId: string,
+): Promise<ModelMessage[]> {
+  const key = convKey(chatId, sessionId);
+  if (conversations.has(key)) return conversations.get(key)!;
+  const data = await loadJSON<unknown[]>(convPath(chatId, sessionId));
   const history = Array.isArray(data) ? data.map(migrateMessage) : [];
-  conversations.set(chatId, history);
+  conversations.set(key, history);
   return history;
 }
 
-export async function saveConversation(chatId: number): Promise<void> {
-  const history = conversations.get(chatId);
+export async function saveConversation(
+  chatId: number,
+  sessionId: string,
+): Promise<void> {
+  const key = convKey(chatId, sessionId);
+  const history = conversations.get(key);
   if (!history) return;
   const toSave =
     history.length > MAX_DISK_MESSAGES
@@ -76,8 +90,12 @@ export async function saveConversation(chatId: number): Promise<void> {
     });
     return { ...msg, content: cleanParts };
   });
-  await saveJSON(convPath(chatId), sanitized).catch((e: Error) =>
-    log.error("persist", `save conv failed`, { chatId, err: e.message }),
+  await saveJSON(convPath(chatId, sessionId), sanitized).catch((e: Error) =>
+    log.error("persist", "save conv failed", {
+      chatId,
+      sessionId,
+      err: e.message,
+    }),
   );
 }
 
@@ -85,8 +103,9 @@ export async function saveConversation(chatId: number): Promise<void> {
 
 export async function getContextMessages(
   chatId: number,
+  sessionId: string,
 ): Promise<ModelMessage[]> {
-  const history = await loadConversation(chatId);
+  const history = await loadConversation(chatId, sessionId);
   const recent = history.slice(-MAX_CONTEXT_MESSAGES);
 
   const truncationBoundary = Math.max(0, recent.length - RECENT_FULL_TOOLS);
@@ -142,27 +161,30 @@ export async function getContextMessages(
 
 export async function addUserMessage(
   chatId: number,
+  sessionId: string,
   content: UserContent,
 ): Promise<void> {
-  const history = await loadConversation(chatId);
+  const history = await loadConversation(chatId, sessionId);
   history.push({ role: "user", content });
-  saveConversation(chatId).catch(() => {});
+  saveConversation(chatId, sessionId).catch(() => {});
 }
 
 export async function appendResponseMessages(
   chatId: number,
+  sessionId: string,
   messages: ModelMessage[],
 ): Promise<void> {
-  const history = await loadConversation(chatId);
+  const history = await loadConversation(chatId, sessionId);
   history.push(...messages);
-  saveConversation(chatId).catch(() => {});
+  saveConversation(chatId, sessionId).catch(() => {});
 }
 
 export async function addAssistantMessage(
   chatId: number,
+  sessionId: string,
   content: string,
 ): Promise<void> {
-  const history = await loadConversation(chatId);
+  const history = await loadConversation(chatId, sessionId);
   history.push({ role: "assistant", content });
-  saveConversation(chatId).catch(() => {});
+  saveConversation(chatId, sessionId).catch(() => {});
 }

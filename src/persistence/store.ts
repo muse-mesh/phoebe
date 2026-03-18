@@ -7,6 +7,7 @@ import { DATA_DIR } from "../config.js";
 
 export async function ensureDataDir(): Promise<void> {
   await fs.mkdir(path.join(DATA_DIR, "conversations"), { recursive: true });
+  await fs.mkdir(path.join(DATA_DIR, "sessions"), { recursive: true });
 }
 
 export async function saveJSON(filePath: string, data: unknown): Promise<void> {

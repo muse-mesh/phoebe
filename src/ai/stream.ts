@@ -3,7 +3,7 @@
 
 import { streamText, stepCountIs } from "ai";
 import type { ModelMessage, UserContent } from "ai";
-import { buildTools, setToolActionCallback } from "../tools.js";
+import { buildTools, setToolActionCallback, setSessionSkillsDir } from "../tools.js";
 import { formatError } from "../errors.js";
 import { buildPrompt } from "../bot/prompt.js";
 import { resolveProvider } from "../bot/instance.js";
@@ -39,6 +39,8 @@ export async function runAIStream(opts: {
   contextMessages: ModelMessage[];
   userContent: UserContent;
   abortSignal?: AbortSignal;
+  sessionSkillsDir?: string;
+  sessionTitle?: string;
 }): Promise<StreamResult> {
   const { channel, modelId, userName, contextMessages } = opts;
 
@@ -68,7 +70,7 @@ export async function runAIStream(opts: {
 
   let toolStepCount = 0;
 
-  const systemPrompt = buildPrompt(userName);
+  const systemPrompt = buildPrompt(userName, opts.sessionTitle);
   let sentTextLength = 0;
 
   // Wire up tool action notifications — tools.ts execute() calls this callback
@@ -76,6 +78,11 @@ export async function runAIStream(opts: {
   setToolActionCallback((toolName, detail) => {
     channel.sendToolAction(toolName, detail).catch(() => {});
   });
+
+  // Set session skills directory so skill tools operate on the active session
+  if (opts.sessionSkillsDir) {
+    setSessionSkillsDir(opts.sessionSkillsDir);
+  }
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -175,6 +182,7 @@ export async function runAIStream(opts: {
     clearTimeout(timeoutId);
     clearInterval(typingInterval);
     setToolActionCallback(null);
+    setSessionSkillsDir(null);
     await channel.sendError(formatError(initErr));
     return {
       fullText: "",
@@ -212,6 +220,7 @@ export async function runAIStream(opts: {
       clearTimeout(timeoutId);
       clearInterval(typingInterval);
       setToolActionCallback(null);
+      setSessionSkillsDir(null);
       await channel.sendError(formatError(err));
       return { fullText, responseMessages: [], timedOut: false, toolStepCount };
     }
@@ -220,6 +229,7 @@ export async function runAIStream(opts: {
   clearTimeout(timeoutId);
   clearInterval(typingInterval);
   setToolActionCallback(null);
+  setSessionSkillsDir(null);
 
   // Collect response messages (with timeout to prevent hanging after abort)
   let responseMessages: ModelMessage[] = [];

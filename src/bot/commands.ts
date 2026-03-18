@@ -20,11 +20,19 @@ import {
   saveChatVoices,
   TTS_VOICES,
   conversations,
+  convKey,
   convPath,
   userProfiles,
   isVoiceReplyEnabled,
   chatVoiceReply,
   saveChatVoiceReply,
+  getActiveSession,
+  getActiveSessionId,
+  createSession,
+  switchSession,
+  renameSession,
+  deleteSession,
+  listSessions,
 } from "../persistence/index.js";
 import {
   resolveModelId,
@@ -44,6 +52,19 @@ import { isOllamaEnabled } from "../config.js";
 import log from "../logger.js";
 
 // ── Model Browsing Helpers ───────────────────────────────────────────────────
+
+/** Format a timestamp as a relative age string (e.g. "2h ago", "3d ago"). */
+function formatAge(isoDate: string): string {
+  const ms = Date.now() - new Date(isoDate).getTime();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
 
 function buildModelsMessage(
   chatId: number,
@@ -108,15 +129,16 @@ export function registerCommands() {
         "/skills - List skills\n" +
         "/models - Browse all models\n" +
         "/model - Switch model\n" +
+        "/session - Manage sessions\n" +
         "/voice - Switch TTS voice\n" +
         "/voicereply - Toggle voice replies\n" +
         "/refreshmodels - Update model catalog\n" +
-        "/clear - Clear history\n" +
+        "/clear - Clear session history\n" +
         "/restart - Restart bot",
     ),
   );
 
-  bot.command("status", (ctx) => {
+  bot.command("status", async (ctx) => {
     const uptimeSec = Math.floor((Date.now() - startedAt) / 1000);
     const h = Math.floor(uptimeSec / 3600);
     const m = Math.floor((uptimeSec % 3600) / 60);
@@ -129,18 +151,20 @@ export function registerCommands() {
     const ollamaLine = isOllamaEnabled()
       ? `\nOllama: ${catalogInfo.ollamaCount} local models`
       : "";
+    const session = await getActiveSession(ctx.chat.id);
+    const { sessions } = await listSessions(ctx.chat.id);
     return ctx.reply(
       `Phoebe Status\n` +
         `Uptime: ${h}h ${m}m ${s}s\n` +
         `RAM: ${rss}MB RSS / ${heap}MB heap\n` +
         `Node: ${process.version}\n` +
         `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : ""}\n` +
+        `Session: ${session.title} (${sessions.length} total)\n` +
         `Voice Reply: ${isVoiceReplyEnabled(ctx.chat.id) ? "on" : "off"}\n` +
         `Catalog: ${catalogInfo.count} models${ollamaLine}\n` +
         `Tools: ${toolNames.length}\n` +
         `Skills: ${getSkillCount()}\n` +
         `Max steps: ${MAX_STEPS}\n` +
-        `Conversations: ${conversations.size}\n` +
         `Users: ${userProfiles.size}`,
     );
   });
@@ -272,9 +296,11 @@ export function registerCommands() {
   });
 
   bot.command("clear", async (ctx) => {
-    conversations.delete(ctx.chat.id);
-    await fs.unlink(convPath(ctx.chat.id)).catch(() => {});
-    return ctx.reply("History cleared.");
+    const sessionId = await getActiveSessionId(ctx.chat.id);
+    const key = convKey(ctx.chat.id, sessionId);
+    conversations.delete(key);
+    await fs.unlink(convPath(ctx.chat.id, sessionId)).catch(() => {});
+    return ctx.reply("Session history cleared.");
   });
 
   bot.command("restart", async (ctx) => {
@@ -291,6 +317,82 @@ export function registerCommands() {
     }
   });
 
+  // ── Session Management ──────────────────────────────────────────────────
+
+  bot.command("session", async (ctx) => {
+    const arg = ctx.message!.text.replace(/^\/session(@\w+)?\s*/, "").trim();
+
+    // No args — show current session + list all
+    if (!arg) {
+      const { sessions, activeId } = await listSessions(ctx.chat.id);
+      const current = sessions.find((s) => s.id === activeId)!;
+      let text = `\u{1F4CB} Current: ${current.title} (${current.id})\n\n`;
+      text += `Sessions (${sessions.length}):\n`;
+      for (const s of sessions) {
+        const icon = s.id === activeId ? "\u2705" : "\u2B1C";
+        const age = formatAge(s.updatedAt);
+        text += `${icon} ${s.title} \u00b7 ${age}\n`;
+      }
+
+      // Build inline keyboard for switching
+      const kb = new InlineKeyboard();
+      const nonActive = sessions.filter((s) => s.id !== activeId);
+      for (const s of nonActive.slice(0, 6)) {
+        kb.text(s.title.slice(0, 20), `ss:${s.id}`);
+        if (nonActive.indexOf(s) % 2 === 1) kb.row();
+      }
+      kb.row().text("+ New Session", "sn");
+
+      return ctx.reply(text, { reply_markup: kb });
+    }
+
+    // Subcommands
+    const spaceIdx = arg.indexOf(" ");
+    const sub = (spaceIdx === -1 ? arg : arg.slice(0, spaceIdx)).toLowerCase();
+    const rest = spaceIdx === -1 ? "" : arg.slice(spaceIdx + 1).trim();
+
+    if (sub === "new") {
+      const session = await createSession(ctx.chat.id, rest || undefined);
+      return ctx.reply(
+        `\u2728 Created: ${session.title} (${session.id})\nSwitched to new session.`,
+      );
+    }
+
+    if (sub === "rename") {
+      if (!rest) return ctx.reply("Usage: /session rename <new title>");
+      const session = await getActiveSession(ctx.chat.id);
+      await renameSession(ctx.chat.id, session.id, rest);
+      return ctx.reply(`Session renamed to: ${rest}`);
+    }
+
+    if (sub === "delete" || sub === "del") {
+      if (!rest) return ctx.reply("Usage: /session delete <id>");
+      const result = await deleteSession(ctx.chat.id, rest);
+      if (!result.deleted) return ctx.reply(result.reason ?? "Failed.");
+      const newActive = await getActiveSession(ctx.chat.id);
+      return ctx.reply(
+        `Session ${rest} deleted. Active: ${newActive.title}`,
+      );
+    }
+
+    // Try switching to a session by ID
+    const session = await switchSession(ctx.chat.id, sub);
+    if (session) {
+      return ctx.reply(
+        `\u{1F504} Switched to: ${session.title} (${session.id})`,
+      );
+    }
+
+    return ctx.reply(
+      "Session commands:\n" +
+        "/session \u2014 list all\n" +
+        "/session new [title] \u2014 create\n" +
+        "/session rename <title> \u2014 rename current\n" +
+        "/session delete <id> \u2014 delete\n" +
+        "/session <id> \u2014 switch",
+    );
+  });
+
   // ── Callback Queries (Model Pagination) ────────────────────────────────
 
   bot.on("callback_query:data", async (ctx) => {
@@ -298,6 +400,35 @@ export function registerCommands() {
 
     if (data === "noop") {
       return ctx.answerCallbackQuery();
+    }
+
+    // Session switch
+    if (data.startsWith("ss:")) {
+      const sessionId = data.slice(3);
+      const session = await switchSession(ctx.chat!.id, sessionId);
+      if (session) {
+        await ctx
+          .editMessageText(
+            `\u{1F504} Switched to: ${session.title} (${session.id})`,
+          )
+          .catch(() => {});
+      }
+      return ctx.answerCallbackQuery({
+        text: session
+          ? `Switched to ${session.title}`
+          : "Session not found",
+      });
+    }
+
+    // New session from button
+    if (data === "sn") {
+      const session = await createSession(ctx.chat!.id);
+      await ctx
+        .editMessageText(
+          `\u2728 Created: ${session.title} (${session.id})\nSwitched to new session.`,
+        )
+        .catch(() => {});
+      return ctx.answerCallbackQuery({ text: `Created ${session.title}` });
     }
 
     let page: number;

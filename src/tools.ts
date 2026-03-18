@@ -21,9 +21,16 @@ interface SkillEntry {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const BASH_TIMEOUT = 20 * 60 * 1000; // 20 minutes per command
+const BG_TIMEOUT = 10_000; // 10s to capture PID from background command
 const MAX_OUTPUT = 50_000;
 const HOME = process.env.HOME ?? "/home/phoebe";
 const GLOBAL_SKILLS_DIR = path.join(HOME, ".agents", "skills");
+
+/** Detect if a command ends with & (background operator, not &&). */
+function isBackgroundCommand(command: string): boolean {
+  const trimmed = command.trimEnd();
+  return trimmed.endsWith("&") && !trimmed.endsWith("&&");
+}
 
 // ── Tool Action Callback ─────────────────────────────────────────────────────
 // Called by each tool execute() to notify the user what's happening.
@@ -38,6 +45,19 @@ export function setToolActionCallback(cb: ToolActionCallback | null): void {
 
 function notifyToolAction(toolName: string, detail: string): void {
   if (_onToolAction) _onToolAction(toolName, detail);
+}
+
+// ── Session Skills Context ───────────────────────────────────────────────────
+// Set per-request so skill tools operate on the active session's skills dir.
+
+let _sessionSkillsDir: string | null = null;
+
+export function setSessionSkillsDir(dir: string | null): void {
+  _sessionSkillsDir = dir;
+}
+
+function getEffectiveSkillsDir(): string {
+  return _sessionSkillsDir ?? SKILLS_DIR;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -135,15 +155,25 @@ async function scanSkillDir(
 
 export async function discoverSkills(): Promise<SkillEntry[]> {
   skillRegistry = [];
-  try {
-    await fs.mkdir(SKILLS_DIR, { recursive: true });
-  } catch {}
+  const sessionDir = getEffectiveSkillsDir();
 
   const seen = new Set<string>();
 
-  // Project-local skills take priority
+  // Session-specific skills (highest priority, if active)
+  if (sessionDir !== SKILLS_DIR) {
+    try {
+      await fs.mkdir(sessionDir, { recursive: true });
+    } catch {}
+    await scanSkillDir(sessionDir, skillRegistry, seen);
+  }
+
+  // Project-local shared skills
+  try {
+    await fs.mkdir(SKILLS_DIR, { recursive: true });
+  } catch {}
   await scanSkillDir(SKILLS_DIR, skillRegistry, seen);
-  // Then global ~/.agents/skills
+
+  // Global ~/.agents/skills
   await scanSkillDir(GLOBAL_SKILLS_DIR, skillRegistry, seen);
 
   log.info("skills", `discovered ${skillRegistry.length} skills`);
@@ -180,6 +210,32 @@ export function buildTools() {
           command: command.slice(0, 200),
         });
         return `⛔ Security: ${check.reason}. This command is not allowed.`;
+      }
+
+      // Detect background commands (trailing &) — handle to prevent hanging
+      if (isBackgroundCommand(command)) {
+        const logFile = `/tmp/phoebe_bg_${Date.now()}.log`;
+        const stripped = command.trimEnd().replace(/&\s*$/, "").trim();
+        // Wrap: run in subshell with redirected FDs so bash exits immediately
+        const wrappedCmd = `(${stripped}) </dev/null >${logFile} 2>&1 &\necho "BGPID:$!"`;
+        notifyToolAction("bash", `[background] ${stripped}`);
+        log.toolCall("bash", { command: stripped, background: true, logFile });
+        const t0 = Date.now();
+        const result = await execBash(wrappedCmd, {
+          timeout: BG_TIMEOUT,
+          cwd,
+        });
+        const pidMatch = result.stdout.match(/BGPID:(\d+)/);
+        const pid = pidMatch ? pidMatch[1] : "unknown";
+        const output =
+          `\u23f3 Background process started\n` +
+          `PID: ${pid}\n` +
+          `Log: ${logFile}\n\n` +
+          `Check output:  cat ${logFile}\n` +
+          `Check status:  ps -p ${pid} -o pid,stat,etime,comm\n` +
+          `Stop process:  kill ${pid}`;
+        log.toolResult("bash", "ok", output, Date.now() - t0);
+        return output;
       }
 
       notifyToolAction("bash", command);
@@ -414,6 +470,7 @@ export function buildTools() {
         normalised = `${parts[0]}/${parts[1]}@${parts[2]}`;
       }
 
+      const installDir = getEffectiveSkillsDir();
       try {
         const cmd = `npx -y skills add "${normalised}" --copy -y -g`;
         notifyToolAction("install_skill", normalised);
@@ -421,14 +478,14 @@ export function buildTools() {
         const result = execSync(cmd, {
           timeout: 120000,
           encoding: "utf-8",
-          cwd: SKILLS_DIR,
+          cwd: installDir,
           env: { ...process.env, CI: "1" },
         });
         log.info("skills", `install output: ${result.trim().slice(0, 500)}`);
-        // Copy newly installed skills from global agents dir into our skills dir
+        // Copy newly installed skills from global agents dir into session skills dir
         try {
           execSync(
-            `cp -rn ~/.agents/skills/* "${SKILLS_DIR}/" 2>/dev/null || true`,
+            `cp -rn ~/.agents/skills/* "${installDir}/" 2>/dev/null || true`,
             { encoding: "utf-8", timeout: 5000 },
           );
         } catch {}
@@ -440,7 +497,7 @@ export function buildTools() {
         // execSync throws on non-zero exit; try the copy fallback anyway
         try {
           execSync(
-            `cp -rn ~/.agents/skills/* "${SKILLS_DIR}/" 2>/dev/null || true`,
+            `cp -rn ~/.agents/skills/* "${installDir}/" 2>/dev/null || true`,
             { encoding: "utf-8", timeout: 5000 },
           );
         } catch {}
