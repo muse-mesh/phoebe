@@ -7,6 +7,13 @@ import { sendChunked } from "../bot/instance.js";
 import type { OutputChannel } from "./channel.js";
 import log from "../logger.js";
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export class TelegramChannel implements OutputChannel {
   constructor(private ctx: Context) {}
 
@@ -31,6 +38,21 @@ export class TelegramChannel implements OutputChannel {
           err: (e as Error).message,
         });
       });
+    });
+  }
+
+  async sendToolResult(toolName: string, result: string): Promise<void> {
+    if (!result || result === "(no result)") return;
+    // Truncate to fit Telegram's 4096 char limit with room for formatting
+    const maxLen = 3800;
+    const truncated =
+      result.length > maxLen
+        ? result.slice(0, maxLen) + "\n…(truncated)"
+        : result;
+    const msg = `<pre>${escapeHtml(truncated)}</pre>`;
+    await this.ctx.reply(msg, { parse_mode: "HTML" }).catch(() => {
+      // Fallback: send plain text if HTML fails
+      this.ctx.reply(truncated.slice(0, 4000)).catch(() => {});
     });
   }
 

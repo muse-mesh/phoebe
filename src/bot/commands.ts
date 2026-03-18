@@ -48,15 +48,15 @@ import log from "../logger.js";
 function buildModelsMessage(
   chatId: number,
   page: number,
-  options?: { filter?: string; freeOnly?: boolean },
+  options?: { filter?: string; ollamaOnly?: boolean },
 ): { text: string; keyboard: InlineKeyboard } {
   const current = getChatModel(chatId);
   const result = getModelsPage(page, {
     filter: options?.filter,
-    freeOnly: options?.freeOnly,
+    ollamaOnly: options?.ollamaOnly,
   });
-  const label = options?.freeOnly
-    ? "Free Models"
+  const label = options?.ollamaOnly
+    ? "\u{1F4BB} Ollama Models (Local)"
     : options?.filter
       ? `Models matching "${options.filter}"`
       : "Models";
@@ -67,13 +67,14 @@ function buildModelsMessage(
     const active = m.id === current ? " \u2713" : "";
     const price = formatPrice(m.pricing);
     const ctxLen = formatContextLength(m.context_length);
-    text += `${m.id}${active}\n  ${m.name} | ${ctxLen} ctx | ${price}\n\n`;
+    const source = m.id.startsWith("ollama/") ? "\u{1F4BB}" : "\u2601\uFE0F";
+    text += `${source} ${m.id}${active}\n  ${m.name} | ${ctxLen} ctx | ${price}\n\n`;
   }
 
   text += "/model <id> to switch";
 
   const buildCb = (p: number) => {
-    if (options?.freeOnly) return `mf:${p}`;
+    if (options?.ollamaOnly) return `mo:${p}`;
     if (options?.filter) return `ms:${p}:${options.filter.slice(0, 40)}`;
     return `m:${p}`;
   };
@@ -83,10 +84,12 @@ function buildModelsMessage(
   kb.text(`${result.page}/${result.totalPages}`, "noop");
   if (result.page < result.totalPages)
     kb.text("Next \u25b6", buildCb(result.page + 1));
-  if (!options?.freeOnly) {
-    kb.row().text("\ud83c\udd93 Free Only", "mf:1");
-  } else {
-    kb.row().text("\ud83d\udccb All Models", "m:1");
+  if (isOllamaEnabled()) {
+    if (!options?.ollamaOnly) {
+      kb.row().text("\u{1F4BB} Ollama Only", "mo:1");
+    } else {
+      kb.row().text("\u{1F4CB} All Models", "m:1");
+    }
   }
 
   return { text, keyboard: kb };
@@ -169,11 +172,11 @@ export function registerCommands() {
       );
     }
     const arg = ctx.message!.text.replace(/^\/models(@\w+)?\s*/, "").trim();
-    const freeOnly = arg.toLowerCase() === "free";
-    const filter = freeOnly ? undefined : arg || undefined;
+    const ollamaOnly = arg.toLowerCase() === "ollama";
+    const filter = ollamaOnly ? undefined : arg || undefined;
     const { text, keyboard } = buildModelsMessage(ctx.chat.id, 1, {
       filter,
-      freeOnly,
+      ollamaOnly,
     });
     return ctx.reply(text, { reply_markup: keyboard });
   });
@@ -298,11 +301,11 @@ export function registerCommands() {
     }
 
     let page: number;
-    let options: { filter?: string; freeOnly?: boolean } = {};
+    let options: { filter?: string; ollamaOnly?: boolean } = {};
 
-    if (data.startsWith("mf:")) {
+    if (data.startsWith("mo:")) {
       page = parseInt(data.slice(3));
-      options.freeOnly = true;
+      options.ollamaOnly = true;
     } else if (data.startsWith("ms:")) {
       const rest = data.slice(3);
       const colonIdx = rest.indexOf(":");

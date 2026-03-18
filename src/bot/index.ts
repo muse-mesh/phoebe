@@ -17,6 +17,9 @@ import { bot } from "./instance.js";
 import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID } from "../config.js";
 import { getCatalogInfo } from "../models.js";
 import { getSkillCount } from "../tools.js";
+import { getChatModel } from "../persistence/index.js";
+import { isOllamaModel } from "./instance.js";
+import { isOllamaEnabled } from "../config.js";
 import log from "../logger.js";
 
 // ── Register all handlers ────────────────────────────────────────────────────
@@ -33,13 +36,18 @@ registerMessageHandlers();
 export async function notifyOwner(): Promise<void> {
   if (!OWNER_ID) return;
   try {
+    const currentModel = OWNER_ID ? getChatModel(OWNER_ID) : DEFAULT_MODEL;
+    const catalogInfo = getCatalogInfo();
+    const ollamaLine = isOllamaEnabled()
+      ? `\nOllama: ${catalogInfo.ollamaCount} local models`
+      : "";
     await bot.api.sendMessage(
       OWNER_ID,
       `Phoebe is online!\n` +
-        `Model: ${DEFAULT_MODEL}\n` +
+        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : ""}\n` +
         `Tools: ${toolNames.join(", ")}\n` +
         `Skills: ${getSkillCount()}\n` +
-        `Catalog: ${getCatalogInfo().count} models\n` +
+        `Catalog: ${catalogInfo.count} models${ollamaLine}\n` +
         `Max steps: ${MAX_STEPS}\n` +
         `Node: ${process.version}`,
     );

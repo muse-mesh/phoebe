@@ -285,7 +285,7 @@ export function getCatalogInfo(): {
 /** Paginated model listing, sorted by created desc (latest first). */
 export function getModelsPage(
   page: number,
-  options?: { pageSize?: number; filter?: string; freeOnly?: boolean },
+  options?: { pageSize?: number; filter?: string; ollamaOnly?: boolean },
 ): {
   models: AIModel[];
   page: number;
@@ -304,12 +304,8 @@ export function getModelsPage(
     );
   }
 
-  if (options?.freeOnly) {
-    models = models.filter(
-      (m) =>
-        parseFloat(m.pricing.prompt) === 0 &&
-        parseFloat(m.pricing.completion) === 0,
-    );
+  if (options?.ollamaOnly) {
+    models = models.filter((m) => m.id.startsWith("ollama/"));
   }
 
   // Sort by created descending (latest first)

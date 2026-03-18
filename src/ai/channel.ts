@@ -12,6 +12,9 @@ export interface OutputChannel {
   /** Send a specific tool action notification (e.g. "$ ls -la /home"). */
   sendToolAction(toolName: string, detail: string): Promise<void>;
 
+  /** Send a truncated tool result so the user can see what the tool returned. */
+  sendToolResult(toolName: string, result: string): Promise<void>;
+
   /** Called with incremental text chunks as they stream from the model. */
   onStreamChunk(text: string): void;
 

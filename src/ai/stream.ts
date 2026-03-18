@@ -153,6 +153,12 @@ export async function runAIStream(opts: {
                       ? res
                       : (JSON.stringify(res, null, 2) ?? "(unserializable)");
                 log.toolResult(tc.toolName, "ok", resultStr, 0);
+
+                // Send tool result to the user so they see output even if
+                // the model responds with a lazy "(task completed)".
+                channel
+                  .sendToolResult(tc.toolName, resultStr)
+                  .catch(() => {});
               }
             }
           }

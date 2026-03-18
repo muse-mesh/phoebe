@@ -46,6 +46,19 @@ export class FirestoreChannel implements OutputChannel {
     );
   }
 
+  async sendToolResult(_toolName: string, result: string): Promise<void> {
+    if (!result || result === "(no result)") return;
+    // Append a truncated tool result to the pending text for the web UI
+    const maxLen = 2000;
+    const truncated =
+      result.length > maxLen
+        ? result.slice(0, maxLen) + "\n…(truncated)"
+        : result;
+    this.pendingText +=
+      (this.pendingText ? "\n\n" : "") + "```\n" + truncated + "\n```";
+    await this.flushPendingText();
+  }
+
   onStreamChunk(chunk: string): void {
     this.pendingText += chunk;
 
