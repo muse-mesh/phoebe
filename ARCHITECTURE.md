@@ -325,15 +325,15 @@ All tools are defined in `tools.ts` using the Vercel AI SDK `tool()` helper with
 
 ### Tool Definitions
 
-| #   | Tool             | Parameters                                            | Security                          | Output                                                      |
-| --- | ---------------- | ----------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| #   | Tool             | Parameters                                            | Security                          | Output                                                              |
+| --- | ---------------- | ----------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------- |
 | 1   | `bash`           | `command: string`, `timeout?: number`, `cwd?: string` | `validateBashCommand()`           | stdout + stderr + exit code (50K limit). Background: PID + log path |
-| 2   | `readFile`       | `filePath: string`                                    | `validateFilePath(path, "read")`  | File contents (50K char limit)               |
-| 3   | `writeFile`      | `filePath: string`, `content: string`                 | `validateFilePath(path, "write")` | Success/error message                        |
-| 4   | `list_skills`    | `filter?: string`                                     | None                              | Skill names + descriptions (session-scoped)  |
-| 5   | `activate_skill` | `name: string`                                        | None                              | SKILL.md content (3K char limit)             |
-| 6   | `search_skills`  | `query: string`                                       | None                              | Registry search results                      |
-| 7   | `install_skill`  | `source: string`                                      | None                              | Install confirmation (to session skills dir) |
+| 2   | `readFile`       | `filePath: string`                                    | `validateFilePath(path, "read")`  | File contents (50K char limit)                                      |
+| 3   | `writeFile`      | `filePath: string`, `content: string`                 | `validateFilePath(path, "write")` | Success/error message                                               |
+| 4   | `list_skills`    | `filter?: string`                                     | None                              | Skill names + descriptions (session-scoped)                         |
+| 5   | `activate_skill` | `name: string`                                        | None                              | SKILL.md content (3K char limit)                                    |
+| 6   | `search_skills`  | `query: string`                                       | None                              | Registry search results                                             |
+| 7   | `install_skill`  | `source: string`                                      | None                              | Install confirmation (to session skills dir)                        |
 
 ### Execution Flow
 
@@ -409,12 +409,12 @@ Phoebe stores full `ModelMessage` objects including tool-call and tool-result pa
 
 ### Storage
 
-| Constant                 |  Value | Purpose                                              |
-| ------------------------ | -----: | ---------------------------------------------------- |
-| `MAX_DISK_MESSAGES`      |    500 | Maximum messages persisted to disk per session        |
-| `MAX_CONTEXT_MESSAGES`   |    100 | Maximum messages sent to the model as context         |
-| `RECENT_FULL_TOOLS`      |     30 | Last N messages keep full tool result text            |
-| `MAX_TOOL_RESULT_LENGTH` | 10,000 | Truncation limit for older tool results               |
+| Constant                 |  Value | Purpose                                        |
+| ------------------------ | -----: | ---------------------------------------------- |
+| `MAX_DISK_MESSAGES`      |    500 | Maximum messages persisted to disk per session |
+| `MAX_CONTEXT_MESSAGES`   |    100 | Maximum messages sent to the model as context  |
+| `RECENT_FULL_TOOLS`      |     30 | Last N messages keep full tool result text     |
+| `MAX_TOOL_RESULT_LENGTH` | 10,000 | Truncation limit for older tool results        |
 
 ### Windowing Logic
 
@@ -608,16 +608,16 @@ All state is stored as JSON files on disk in `DATA_DIR` (mounted as a Docker vol
 
 ### Files
 
-| File                                     | Structure                 | Purpose                                  |
-| ---------------------------------------- | ------------------------- | ---------------------------------------- |
-| `users.json`                             | `UserProfile[]`           | User ID, name, username, first/last seen |
-| `models.json`                            | `{ chatId: modelId }`     | Per-chat model override                  |
-| `voices.json`                            | `{ chatId: voiceName }`   | Per-chat TTS voice preference            |
-| `voice-reply.json`                       | `{ chatId: boolean }`     | Per-chat voice reply toggle              |
-| `openrouter-models.json`                 | `AIModel[]`               | Cached cloud model catalog (Mume AI)     |
-| `ollama-models.json`                     | `AIModel[]`               | Cached local model catalog (Ollama)      |
-| `sessions/<chatId>.json`                 | `SessionIndex`            | Session list + active session per chat   |
-| `conversations/<chatId>_<sid>.json`      | `ModelMessage[]`          | Conversation history per session (max 500) |
+| File                                | Structure               | Purpose                                    |
+| ----------------------------------- | ----------------------- | ------------------------------------------ |
+| `users.json`                        | `UserProfile[]`         | User ID, name, username, first/last seen   |
+| `models.json`                       | `{ chatId: modelId }`   | Per-chat model override                    |
+| `voices.json`                       | `{ chatId: voiceName }` | Per-chat TTS voice preference              |
+| `voice-reply.json`                  | `{ chatId: boolean }`   | Per-chat voice reply toggle                |
+| `openrouter-models.json`            | `AIModel[]`             | Cached cloud model catalog (Mume AI)       |
+| `ollama-models.json`                | `AIModel[]`             | Cached local model catalog (Ollama)        |
+| `sessions/<chatId>.json`            | `SessionIndex`          | Session list + active session per chat     |
+| `conversations/<chatId>_<sid>.json` | `ModelMessage[]`        | Conversation history per session (max 500) |
 
 ### Init Sequence
 

@@ -370,9 +370,7 @@ export function registerCommands() {
       const result = await deleteSession(ctx.chat.id, rest);
       if (!result.deleted) return ctx.reply(result.reason ?? "Failed.");
       const newActive = await getActiveSession(ctx.chat.id);
-      return ctx.reply(
-        `Session ${rest} deleted. Active: ${newActive.title}`,
-      );
+      return ctx.reply(`Session ${rest} deleted. Active: ${newActive.title}`);
     }
 
     // Try switching to a session by ID
@@ -414,9 +412,7 @@ export function registerCommands() {
           .catch(() => {});
       }
       return ctx.answerCallbackQuery({
-        text: session
-          ? `Switched to ${session.title}`
-          : "Session not found",
+        text: session ? `Switched to ${session.title}` : "Session not found",
       });
     }
 

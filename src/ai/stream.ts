@@ -3,7 +3,11 @@
 
 import { streamText, stepCountIs } from "ai";
 import type { ModelMessage, UserContent } from "ai";
-import { buildTools, setToolActionCallback, setSessionSkillsDir } from "../tools.js";
+import {
+  buildTools,
+  setToolActionCallback,
+  setSessionSkillsDir,
+} from "../tools.js";
 import { formatError } from "../errors.js";
 import { buildPrompt } from "../bot/prompt.js";
 import { resolveProvider } from "../bot/instance.js";

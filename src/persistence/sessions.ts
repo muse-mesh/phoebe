@@ -278,9 +278,7 @@ export function sessionSkillsPath(sessionId: string): string {
 }
 
 /** Ensure the session skills directory exists. */
-export async function ensureSessionSkillsDir(
-  sessionId: string,
-): Promise<void> {
+export async function ensureSessionSkillsDir(sessionId: string): Promise<void> {
   await fs.mkdir(sessionSkillsPath(sessionId), { recursive: true });
 }
 

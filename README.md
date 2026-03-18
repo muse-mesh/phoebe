@@ -80,15 +80,15 @@ Full-featured bot via [grammY](https://grammy.dev), with streaming typing indica
 
 Seven built-in tools give the AI full agency inside the container:
 
-| Tool             | What it does                                                                     |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `bash`           | Run any shell command with full PATH. Background commands (`&`) handled safely.  |
-| `readFile`       | Read file contents                                                               |
-| `writeFile`      | Create or overwrite files, auto-creates parent directories                       |
-| `list_skills`    | List installed Agent Skills (session-scoped + shared + global)                   |
-| `activate_skill` | Load a skill's instructions into context                                         |
-| `search_skills`  | Search the [skills.sh](https://skills.sh) registry                               |
-| `install_skill`  | Install a skill from the registry (into active session's skills dir)             |
+| Tool             | What it does                                                                    |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `bash`           | Run any shell command with full PATH. Background commands (`&`) handled safely. |
+| `readFile`       | Read file contents                                                              |
+| `writeFile`      | Create or overwrite files, auto-creates parent directories                      |
+| `list_skills`    | List installed Agent Skills (session-scoped + shared + global)                  |
+| `activate_skill` | Load a skill's instructions into context                                        |
+| `search_skills`  | Search the [skills.sh](https://skills.sh) registry                              |
+| `install_skill`  | Install a skill from the registry (into active session's skills dir)            |
 
 Tool calls chain automatically — the model can call tools, inspect results, and call more tools, up to 25 steps per message (configurable).
 
@@ -210,26 +210,26 @@ When set, Phoebe fetches your local model list and adds them to the catalog pref
 
 ## Bot Commands
 
-| Command           | Description                                                  |
-| ----------------- | ------------------------------------------------------------ |
-| `/start`          | Welcome message with feature overview                        |
-| `/status`         | Uptime, RAM, current model, session, skills count            |
-| `/tools`          | List all available tools                                     |
-| `/skills`         | List installed Agent Skills                                  |
-| `/models`         | Browse all models (paginated, inline keyboard navigation)    |
-| `/models ollama`  | Show only local Ollama models                                |
-| `/models <query>` | Search models by name or ID                                  |
-| `/model`          | Show current model with capabilities                         |
-| `/model <id>`     | Switch model (e.g. `/model anthropic/claude-sonnet-4.6`)     |
-| `/session`        | List sessions with inline keyboard for switching             |
-| `/session new`    | Create a new session (optional title)                        |
-| `/session rename` | Rename the current session                                   |
-| `/session delete` | Delete a session by ID                                       |
-| `/voice`          | Browse and switch TTS voice (21 voices)                      |
-| `/voicereply`     | Toggle voice replies on/off for current chat                 |
-| `/refreshmodels`  | Re-fetch model catalog from Mume AI                          |
-| `/clear`          | Clear conversation history for current session               |
-| `/restart`        | Graceful restart — owner only                                |
+| Command           | Description                                               |
+| ----------------- | --------------------------------------------------------- |
+| `/start`          | Welcome message with feature overview                     |
+| `/status`         | Uptime, RAM, current model, session, skills count         |
+| `/tools`          | List all available tools                                  |
+| `/skills`         | List installed Agent Skills                               |
+| `/models`         | Browse all models (paginated, inline keyboard navigation) |
+| `/models ollama`  | Show only local Ollama models                             |
+| `/models <query>` | Search models by name or ID                               |
+| `/model`          | Show current model with capabilities                      |
+| `/model <id>`     | Switch model (e.g. `/model anthropic/claude-sonnet-4.6`)  |
+| `/session`        | List sessions with inline keyboard for switching          |
+| `/session new`    | Create a new session (optional title)                     |
+| `/session rename` | Rename the current session                                |
+| `/session delete` | Delete a session by ID                                    |
+| `/voice`          | Browse and switch TTS voice (21 voices)                   |
+| `/voicereply`     | Toggle voice replies on/off for current chat              |
+| `/refreshmodels`  | Re-fetch model catalog from Mume AI                       |
+| `/clear`          | Clear conversation history for current session            |
+| `/restart`        | Graceful restart — owner only                             |
 
 ---
 
@@ -405,16 +405,16 @@ phoebe/
 
 ### Persistent Data (Docker volume at `/app/data/`)
 
-| File                                          | Contents                                              |
-| --------------------------------------------- | ----------------------------------------------------- |
-| `users.json`                                   | User profiles (id, name, username, first/last seen)   |
-| `models.json`                                  | Per-chat model overrides                              |
-| `voices.json`                                  | Per-chat TTS voice preferences                        |
-| `voice-reply.json`                             | Per-chat voice reply toggle                           |
-| `openrouter-models.json`                       | Cached cloud model catalog (Mume AI)                  |
-| `ollama-models.json`                           | Cached local model catalog (Ollama)                   |
-| `sessions/<chatId>.json`                       | Session index per chat (active session, session list) |
-| `conversations/<chatId>_<sessionId>.json`      | Full conversation history per session (max 500 msgs)  |
+| File                                      | Contents                                              |
+| ----------------------------------------- | ----------------------------------------------------- |
+| `users.json`                              | User profiles (id, name, username, first/last seen)   |
+| `models.json`                             | Per-chat model overrides                              |
+| `voices.json`                             | Per-chat TTS voice preferences                        |
+| `voice-reply.json`                        | Per-chat voice reply toggle                           |
+| `openrouter-models.json`                  | Cached cloud model catalog (Mume AI)                  |
+| `ollama-models.json`                      | Cached local model catalog (Ollama)                   |
+| `sessions/<chatId>.json`                  | Session index per chat (active session, session list) |
+| `conversations/<chatId>_<sessionId>.json` | Full conversation history per session (max 500 msgs)  |
 
 ---
 

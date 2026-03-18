@@ -2,10 +2,7 @@
 
 import { getSkillCount } from "../tools.js";
 
-export function buildPrompt(
-  userName: string,
-  sessionTitle?: string,
-): string {
+export function buildPrompt(userName: string, sessionTitle?: string): string {
   const greeting =
     userName !== "User" ? ` You are chatting with ${userName}.` : "";
   const skillCount = getSkillCount();
