@@ -2,7 +2,7 @@
 
 > Deep dive into Phoebe's internals — how every component connects, communicates, and streams.
 
-This document covers the system design of Phoebe's dual-interface AI agent: **Telegram** (direct bot) and **Web** (browser UI via Firestore). Both interfaces share a single AI streaming core, tool system, and persistence layer.
+This document covers the system design of Phoebe's AI agent, delivered through **Telegram** via [grammY](https://grammy.dev). The architecture is built around an `OutputChannel` abstraction that makes it straightforward to add new delivery channels (WhatsApp, Discord, Slack) without touching the AI core.
 
 ---
 
@@ -14,9 +14,6 @@ This document covers the system design of Phoebe's dual-interface AI agent: **Te
 - [AI Streaming Engine](#ai-streaming-engine)
 - [OutputChannel Abstraction](#outputchannel-abstraction)
 - [Message Flow — Telegram](#message-flow--telegram)
-- [Message Flow — Web Interface](#message-flow--web-interface)
-- [Firestore Data Model](#firestore-data-model)
-- [Pseudo-Streaming Strategy](#pseudo-streaming-strategy)
 - [Tool System](#tool-system)
 - [Agent Skills Lifecycle](#agent-skills-lifecycle)
 - [Conversation Memory & Windowing](#conversation-memory--windowing)
@@ -33,18 +30,11 @@ This document covers the system design of Phoebe's dual-interface AI agent: **Te
 
 ```mermaid
 graph TB
-    subgraph "Client Interfaces"
+    subgraph "Client Interface"
         TG["Telegram<br/>(grammY Bot)"]
-        WEB["Web Browser<br/>(Next.js / React)"]
-    end
-
-    subgraph "Cloud Services"
-        FS[("Cloud Firestore<br/>Message Bus")]
-        AUTH["Firebase Auth<br/>(Google / Apple)"]
     end
 
     subgraph "Phoebe Server (Docker Container)"
-        LISTENER["Web Listener<br/>(firebase-admin onSnapshot)"]
         AI["AI Stream Engine<br/>(Vercel AI SDK v6)"]
         TOOLS["Tools & Skills"]
         TGBOT["Telegram Handler<br/>(grammY)"]
@@ -62,10 +52,6 @@ graph TB
     end
 
     TG <-->|"Bot API"| TGBOT
-    WEB <-->|"onSnapshot<br/>(real-time sync)"| FS
-    FS <-->|"firebase-admin<br/>(onSnapshot + writes)"| LISTENER
-    AUTH -->|"UID verification"| WEB
-    LISTENER --> AI
     TGBOT --> AI
     AI <-->|"streamText()"| OR
     OR --> MODELS
@@ -74,14 +60,12 @@ graph TB
     AI --> TOOLS
     AI --> PERSIST
 
-    style FS fill:#FFA726,stroke:#E65100,color:#000
     style AI fill:#42A5F5,stroke:#1565C0,color:#000
-    style WEB fill:#66BB6A,stroke:#2E7D32,color:#000
     style TG fill:#29B6F6,stroke:#0277BD,color:#000
     style OLLAMA fill:#AB47BC,stroke:#6A1B9A,color:#FFF
 ```
 
-**Key design principle:** The AI engine knows nothing about Telegram or Firestore. It talks to an `OutputChannel` interface. This lets us add new delivery channels (Slack, Discord, CLI, etc.) without touching the AI core.
+**Key design principle:** The AI engine knows nothing about Telegram. It talks to an `OutputChannel` interface. This lets us add new delivery channels (WhatsApp, Discord, Slack, CLI, etc.) without touching the AI core.
 
 ---
 
@@ -89,9 +73,8 @@ graph TB
 
 | Concept               | What it means                                                                                                                                 |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OutputChannel**     | Interface that decouples the AI engine from message delivery. Each interface (Telegram, Web) implements it.                                   |
+| **OutputChannel**     | Interface that decouples the AI engine from message delivery. Each interface (Telegram, future WhatsApp/Discord/Slack) implements it.         |
 | **runAIStream**       | The central function. Takes an OutputChannel, model ID, context, and user input. Orchestrates streaming, tool calls, and response collection. |
-| **Status Document**   | A Firestore document (`status/current`) that acts as a streaming state machine for the web interface.                                         |
 | **Context Windowing** | Smart truncation of conversation history — recent messages keep full detail, older tool results are compressed.                               |
 | **Agent Skills**      | Markdown instruction files loaded into context on demand. The AI discovers, installs, and follows them autonomously.                          |
 
@@ -107,14 +90,12 @@ graph LR
 
     subgraph "Interfaces"
         BOT["bot/<br/><i>grammY commands,<br/>handlers, prompt</i>"]
-        WEB["web/listener.ts<br/><i>Firestore watcher</i>"]
     end
 
     subgraph "AI Core"
         STREAM["ai/stream.ts<br/><i>runAIStream</i>"]
         CHAN["ai/channel.ts<br/><i>OutputChannel</i>"]
         TC["ai/telegram-channel.ts"]
-        FC["ai/firestore-channel.ts"]
     end
 
     subgraph "Capabilities"
@@ -127,34 +108,26 @@ graph LR
 
     subgraph "Infrastructure"
         CONFIG["config.ts"]
-        FS["firestore.ts"]
         PERSIST["persistence/<br/><i>conversations, users,<br/>settings, store</i>"]
         LOGGER["logger.ts"]
         ERRORS["errors.ts"]
     end
 
     INDEX --> BOT
-    INDEX --> WEB
-    INDEX --> FS
     INDEX --> PERSIST
     BOT --> TC
-    WEB --> FC
     TC --> CHAN
-    FC --> CHAN
     BOT --> STREAM
-    WEB --> STREAM
     STREAM --> TOOLS
     STREAM --> CHAN
     TOOLS --> SECURITY
-    FC --> FS
-    WEB --> FS
 
     style STREAM fill:#42A5F5,stroke:#1565C0,color:#000
     style CHAN fill:#AB47BC,stroke:#6A1B9A,color:#fff
     style INDEX fill:#FFA726,stroke:#E65100,color:#000
 ```
 
-### File Inventory (~4,000 lines of TypeScript)
+### File Inventory (~3,200 lines of TypeScript)
 
 | File                               | Lines | Role                                                        |
 | ---------------------------------- | ----: | ----------------------------------------------------------- |
@@ -167,11 +140,9 @@ graph LR
 | `src/stt.ts`                       |    88 | Speech-to-text via ElevenLabs Scribe V2 (fal.ai)            |
 | `src/tts.ts`                       |    72 | Text-to-speech via ElevenLabs Turbo v2.5 (fal.ai)           |
 | `src/errors.ts`                    |    21 | Error pattern → friendly message mapper                     |
-| `src/firestore.ts`                 |    80 | Firebase Admin SDK init + Firestore path helpers            |
 | `src/ai/stream.ts`                 |   310 | Interface-agnostic AI streaming engine                      |
 | `src/ai/channel.ts`                |    27 | OutputChannel interface definition                          |
 | `src/ai/telegram-channel.ts`       |    85 | Telegram OutputChannel implementation                       |
-| `src/ai/firestore-channel.ts`      |   134 | Firestore OutputChannel implementation                      |
 | `src/bot/instance.ts`              |   271 | Bot singleton, AI provider, Markdown→HTML, sendChunked      |
 | `src/bot/commands.ts`              |   322 | All `/command` handlers + inline keyboard callbacks         |
 | `src/bot/handlers.ts`              |   250 | Text, photo, document, voice message handlers               |
@@ -180,7 +151,6 @@ graph LR
 | `src/persistence/conversations.ts` |   168 | Conversation history with context windowing                 |
 | `src/persistence/settings.ts`      |   117 | Per-chat model, voice, voice-reply settings                 |
 | `src/persistence/users.ts`         |    55 | User profile tracking                                       |
-| `src/web/listener.ts`              |   450 | Firestore onSnapshot watcher + instance heartbeat           |
 
 ---
 
@@ -279,25 +249,12 @@ classDiagram
         +sendVoice() → sendAudio
     }
 
-    class FirestoreChannel {
-        -sessionId: string
-        -chatId: string
-        -pendingText: string
-        -CHUNK_THROTTLE_MS: 300
-        +sendTyping() → status{state:"typing"}
-        +onStreamChunk() → throttled pendingText write
-        +onStreamDone() → status{state:"idle", finalText}
-        +sendToolAction() → status{state:"tool", toolLabel}
-        +sendToolResult() → append code block to pendingText
-    }
-
     OutputChannel <|.. TelegramChannel : implements
-    OutputChannel <|.. FirestoreChannel : implements
 ```
 
 ### Why This Matters
 
-Adding a new interface (e.g. Slack, Discord, CLI) requires only:
+Adding a new interface (e.g. WhatsApp, Discord, Slack) requires only:
 
 1. Implement `OutputChannel` (~70 lines)
 2. Wire it to the input source
@@ -355,190 +312,6 @@ sequenceDiagram
 - **Markdown → HTML** — Converts AI markdown (bold, italic, code, links) to Telegram-compatible HTML.
 - **Tool transparency** — Each tool call is shown as an inline monospaced message (e.g. `$ git status`) so users see exactly what the AI is doing. Tool results are also sent as pre-formatted HTML output.
 - **Media handling** — Photos, documents, and voice messages are downloaded (with 3 retries) and forwarded to the AI as multimodal content.
-
----
-
-## Message Flow — Web Interface
-
-The web interface uses Cloud Firestore as a **bidirectional message bus**. This solves the NAT traversal problem — Phoebe runs behind any network, and the browser communicates through Firestore.
-
-```mermaid
-sequenceDiagram
-    participant U as User (Browser)
-    participant W as Web App (Next.js)
-    participant F as Cloud Firestore
-    participant P as Phoebe Server
-    participant AI as Mume AI
-
-    Note over U,AI: 1. User Sends Message
-    U->>W: Types message, clicks Send
-    W->>W: Disable input (streaming guard)
-    W->>F: setDoc(messages/{id}, {role:"user", processed:false, order:N})
-
-    Note over U,AI: 2. Phoebe Picks Up Message
-    F-->>P: onSnapshot fires (new unprocessed message)
-    P->>F: update({processed: true})
-    P->>F: status/current → {state:"typing"}
-
-    Note over U,AI: 3. AI Streaming
-    P->>AI: streamText({model, messages, tools})
-    loop Every 300ms
-        AI-->>P: text chunks
-        P->>F: status/current → {state:"streaming", pendingText:"..."}
-        F-->>W: onSnapshot (status update)
-        W->>U: Render streaming text + indicator
-    end
-
-    Note over U,AI: 4. Tool Execution (if needed)
-    AI-->>P: tool-call
-    P->>F: status/current → {state:"tool", toolLabel:"Running shell..."}
-    F-->>W: onSnapshot → show tool label
-    P->>P: Execute tool, return result to AI
-    P->>AI: Continue with tool result
-
-    Note over U,AI: 5. Response Complete
-    AI-->>P: Stream done
-    P->>F: status/current → {state:"idle", finalText:"..."}
-    P->>F: setDoc(messages/{id}, {role:"assistant", order:N+1})
-    F-->>W: onSnapshot (new message doc)
-    W->>U: Render final message, re-enable input
-
-    Note over W: finalText in status doc prevents<br/>flash between stream end and message arrival
-```
-
----
-
-## Firestore Data Model
-
-All Phoebe data lives under a user-scoped root. The path structure ensures multi-tenant isolation and supports multiple Phoebe instances per user.
-
-```mermaid
-graph TD
-    ROOT["viper/v1"] --> PHOEBE["phoebe/"]
-    PHOEBE --> INST["🔑 {instanceId}<br/><i>e.g. phoebe-pi</i>"]
-
-    INST -->|"subcollection"| SESSIONS["sessions/"]
-    SESSIONS --> SID["🔑 {sessionId}"]
-
-    SID -->|"subcollection"| CHATS["chats/"]
-    CHATS --> CID["🔑 {chatId}"]
-
-    CID -->|"subcollection"| MSGS["messages/"]
-    CID -->|"doc"| STATUS["status/current"]
-
-    MSGS --> MSG1["🔑 msg_17...01<br/>role: user"]
-    MSGS --> MSG2["🔑 msg_17...02<br/>role: assistant"]
-
-    style ROOT fill:#78909C,stroke:#37474F,color:#fff
-    style INST fill:#FFA726,stroke:#E65100,color:#000
-    style STATUS fill:#EF5350,stroke:#C62828,color:#fff
-    style MSG1 fill:#66BB6A,stroke:#2E7D32,color:#000
-    style MSG2 fill:#42A5F5,stroke:#1565C0,color:#000
-```
-
-### Path Structure
-
-| Resource            | Path                              |
-| ------------------- | --------------------------------- |
-| Instance doc        | `viper/v1/phoebe/{instanceId}`    |
-| Sessions collection | `…/phoebe/{instanceId}/sessions`  |
-| Session doc         | `…/sessions/{sessionId}`          |
-| Chats collection    | `…/sessions/{sessionId}/chats`    |
-| Chat doc            | `…/chats/{chatId}`                |
-| Messages collection | `…/chats/{chatId}/messages`       |
-| Status doc          | `…/chats/{chatId}/status/current` |
-
-### Document Schemas
-
-**Instance** — server heartbeat every 60 seconds:
-
-```json
-{
-  "id": "phoebe-pi",
-  "ownerId": "uid_...",
-  "name": "Phoebe",
-  "status": "online",
-  "lastSeen": "<Timestamp>",
-  "capabilities": {
-    "tools": ["bash", "readFile", "writeFile", "..."],
-    "skillCount": 864,
-    "defaultModel": "google/gemini-3-flash-preview"
-  },
-  "platform": { "arch": "arm64", "platform": "linux", "nodeVersion": "v22.x" }
-}
-```
-
-**Message** — written by client (user) or server (assistant):
-
-```json
-{
-  "id": "msg_17...",
-  "role": "user | assistant",
-  "content": "Hello!",
-  "parts": [{ "type": "text", "text": "Hello!" }],
-  "createdAt": "<Timestamp>",
-  "order": 0,
-  "processed": false
-}
-```
-
-**Status** — written by server during streaming:
-
-```json
-{
-  "state": "idle | typing | streaming | tool | error",
-  "pendingText": "partial response so far...",
-  "finalText": "complete response",
-  "toolLabel": "Running shell command...",
-  "updatedAt": "<Timestamp>"
-}
-```
-
-### Message Ordering
-
-Messages use an explicit `order` field rather than timestamps, because network latency can cause out-of-order `createdAt` values:
-
-- **Client** writes `order = messages.length` (count of existing messages)
-- **Server** writes `order = userOrder + 1`
-- **Input is disabled** during streaming to prevent interleaving
-- **Fallback**: If the Firestore compound index isn't ready, automatically falls back to `createdAt` sorting
-
----
-
-## Pseudo-Streaming Strategy
-
-Firestore doesn't support byte-level streaming. Phoebe uses a **status document state machine** with throttled writes:
-
-```mermaid
-stateDiagram-v2
-    [*] --> idle
-    idle --> typing : User message received
-    typing --> streaming : First AI chunk arrives
-    streaming --> streaming : Chunk received (pendingText updated, 300ms throttle)
-    streaming --> tool : Tool call detected
-    tool --> streaming : Tool result → AI resumes
-    tool --> tool : Chained tool calls
-    streaming --> idle : Stream complete (write finalText + message doc)
-    typing --> error : Error
-    streaming --> error : Error
-    tool --> error : Error
-    error --> idle : Reset
-
-    note right of streaming
-        pendingText flushed to Firestore
-        at most once per 300ms
-    end note
-
-    note right of idle
-        finalText preserved in status doc
-        until message document arrives
-        — prevents visual flash
-    end note
-```
-
-### Throttling
-
-The `FirestoreChannel` accumulates text chunks in memory and flushes to Firestore at most once every 300ms. This keeps Firestore write costs manageable while maintaining a responsive UI.
 
 ---
 
@@ -724,39 +497,6 @@ graph TB
 **Write-protected system paths:**
 `/etc/`, `/boot/`, `/usr/`, `/sbin/`, `/bin/`, `/lib/`, `/var/log/`, `/proc/`, `/sys/`
 
-### Firestore Security (Web Interface)
-
-```mermaid
-graph TB
-    subgraph "Firestore Security Rules"
-        R1["Instance docs<br/>read: owner only | write: server only"]
-        R2["Sessions / Chats / Messages<br/>read + write: owner only"]
-        R3["Status doc<br/>read: owner only | write: server only"]
-    end
-
-    subgraph "Auth"
-        USER["User"] -->|"Google / Apple"| FAUTH["Firebase Auth"]
-        FAUTH -->|"UID"| RULES["Security Rules"]
-        RULES -->|"match ownerId"| FS["Firestore"]
-    end
-
-    subgraph "Server Auth"
-        PI["Phoebe Server"] -->|"Service Account"| ADMIN["firebase-admin"]
-        ADMIN -->|"Bypasses rules"| FS
-    end
-
-    style R1 fill:#EF5350,stroke:#C62828,color:#fff
-    style R3 fill:#EF5350,stroke:#C62828,color:#fff
-```
-
-| Concern        | Solution                                                         |
-| -------------- | ---------------------------------------------------------------- |
-| NAT traversal  | Firestore as intermediary — no port forwarding needed            |
-| Client auth    | Firebase Auth (Google/Apple) — UID matched to `ownerId`          |
-| Server auth    | Firebase Admin SDK with service account key                      |
-| Data isolation | Rules enforce `request.auth.uid == resource.data.ownerId`        |
-| Status writes  | Server-only (admin SDK bypasses rules; client rules deny writes) |
-
 ---
 
 ## Model Catalog
@@ -823,8 +563,7 @@ On startup, `index.ts` loads all persistence stores in order:
 2. Load users, models, voices, voice-reply settings
 3. Fetch/load model catalog
 4. Discover installed skills
-5. Init Firestore (if configured)
-6. Start web listener + Telegram bot
+5. Start Telegram bot
 
 ### Graceful Shutdown
 
@@ -874,11 +613,6 @@ graph TB
         DOCKER --> VOL_SKILLS
     end
 
-    subgraph "Optional: Google Cloud"
-        FIRESTORE["Cloud Firestore"]
-        FAUTH["Firebase Auth"]
-    end
-
     subgraph "External APIs"
         MUMEAI["Mume AI Gateway"]
         TELEGRAM["Telegram Bot API"]
@@ -888,10 +622,8 @@ graph TB
     DOCKER <-->|"HTTPS"| MUMEAI
     DOCKER <-->|"Bot API (long-polling)"| TELEGRAM
     DOCKER <-->|"HTTPS"| FAL
-    DOCKER <-.->|"firebase-admin<br/>(optional)"| FIRESTORE
 
     style DOCKER fill:#42A5F5,stroke:#1565C0,color:#000
-    style FIRESTORE fill:#FFA726,stroke:#E65100,color:#000
 ```
 
 ### Container Contents
@@ -925,7 +657,6 @@ The Docker image is built on `node:22-slim` with additional tools:
 | Local Models      | Ollama (@ai-sdk/openai-compatible)    | 2.0     |
 | Telegram          | grammY                                | 1.35    |
 | Schema Validation | Zod                                   | 3.25    |
-| Firestore         | firebase-admin                        | 13.6    |
 | Env Loading       | dotenv                                | 17.3    |
 | Container         | Docker + Docker Compose               | —       |
 | STT/TTS           | ElevenLabs via fal.ai                 | —       |

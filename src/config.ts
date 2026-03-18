@@ -34,11 +34,3 @@ export const ALLOWED_IDS: number[] = process.env.ALLOWED_IDS
 
 export const SKILLS_DIR =
   process.env.SKILLS_DIR || path.resolve(DATA_DIR, "..", "skills");
-
-// ── Firebase / Firestore ─────────────────────────────────────────────────────
-
-export const FIREBASE_SERVICE_ACCOUNT_KEY =
-  process.env.FIREBASE_SERVICE_ACCOUNT_KEY ?? "";
-export const FIREBASE_UID = process.env.FIREBASE_UID ?? "";
-export const PHOEBE_INSTANCE_ID = process.env.PHOEBE_INSTANCE_ID ?? "";
-export const FIRESTORE_ROOT = process.env.FIRESTORE_ROOT ?? "viper/v1";

@@ -13,9 +13,9 @@
         ██║     ██║  ██║╚██████╔╝███████╗██████╔╝███████╗
         ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═════╝ ╚══════╝
 
-**A self-hosted AI agent with full tool access — delivered through Telegram and the web.**
+**A self-hosted AI agent with full tool access — delivered through Telegram.**
 
-Phoebe runs in a Docker container on your own hardware. She connects to any model on [Mume AI](https://mume.ai) (Gemini, Claude, GPT, Llama, etc.) or to your local [Ollama](https://ollama.com) server, has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io). Conversations stream in real-time to Telegram and to a browser UI via Firestore.
+Phoebe runs in a Docker container on your own hardware. She connects to any model on [Mume AI](https://mume.ai) (Gemini, Claude, GPT, Llama, etc.) or to your local [Ollama](https://ollama.com) server, has unrestricted terminal access inside the container, can read and write files, and extends herself with 850+ community [Agent Skills](https://agentskills.io).
 
 No vendor lock-in. No cloud dependency. One `docker compose up` and you're running.
 
@@ -60,10 +60,9 @@ Access thousands of AI models through [Mume AI](https://mume.ai), or run models 
 **Cloud models** connect through Mume AI — Gemini, Claude, GPT, Llama, and hundreds more.
 **Local models** run on your own GPU via Ollama — fully offline, zero API costs. Set `OLLAMA_BASE_URL` and local models appear in the catalog prefixed with `ollama/` (e.g. `ollama/llama3.2`, `ollama/qwen3:8b`).
 
-### Dual Interface
+### Telegram Interface
 
-- **Telegram** — full-featured bot via [grammY](https://grammy.dev), with streaming typing indicators, inline tool transparency, image/document understanding, and voice messages
-- **Web UI** — real-time browser interface via Cloud Firestore as a bidirectional message bus, with pseudo-streaming updates every 300ms
+Full-featured bot via [grammY](https://grammy.dev), with streaming typing indicators, inline tool transparency, tool result output, image/document understanding, and voice messages.
 
 ### Agentic Tool Use
 
@@ -183,19 +182,9 @@ Run models locally with zero API costs. Install [Ollama](https://ollama.com), pu
 When set, Phoebe fetches your local model list and adds them to the catalog prefixed with `ollama/`. Switch to a local model with `/model ollama/llama3.2`.
 
 > **Docker networking:**
+>
 > - **Same machine:** Use `http://host.docker.internal:11434` to reach Ollama on the Docker host (macOS/Windows). On Linux, add `--add-host=host.docker.internal:host-gateway` to `docker-compose.yml`.
 > - **Remote GPU machine:** Point to the LAN IP directly (e.g. `http://192.168.1.100:11434`). On the Ollama machine, set `OLLAMA_HOST=0.0.0.0` so it listens on all interfaces, then no Docker DNS tricks are needed.
-
-### Web Interface (Optional)
-
-To enable the browser UI via Firestore:
-
-| Variable                       | Description                                   |
-| ------------------------------ | --------------------------------------------- |
-| `FIREBASE_SERVICE_ACCOUNT_KEY` | Firebase service account JSON string          |
-| `FIREBASE_UID`                 | Firebase Auth UID for the owner               |
-| `PHOEBE_INSTANCE_ID`           | Unique instance identifier (e.g. `phoebe-pi`) |
-| `FIRESTORE_ROOT`               | Firestore root path (default: `viper/v1`)     |
 
 ### Paths
 
@@ -329,7 +318,7 @@ Phoebe has two interfaces that share a single AI streaming core:
                            │
                     ┌──────▼──────┐
                     │  OutputChan │◄──── TelegramChannel
-                    │  Interface  │◄──── FirestoreChannel
+                    │  Interface  │
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -350,10 +339,9 @@ Phoebe has two interfaces that share a single AI streaming core:
                     └─────────────┘
 ```
 
-The `OutputChannel` interface decouples the AI engine from delivery:
+The `OutputChannel` interface decouples the AI engine from delivery. Adding new channels (WhatsApp, Discord, Slack) requires only implementing this interface (~70 lines) — no changes to the AI core.
 
 - **TelegramChannel** — sends typing indicators, chunked HTML messages, tool action labels, tool result output, voice replies
-- **FirestoreChannel** — writes streaming state to a Firestore status document (300ms throttle) for real-time web UI updates
 
 For the full architecture with Mermaid diagrams, data models, sequence diagrams, and security details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -373,12 +361,10 @@ phoebe/
 │   ├── stt.ts                # Speech-to-text (ElevenLabs via fal.ai)
 │   ├── tts.ts                # Text-to-speech (ElevenLabs via fal.ai)
 │   ├── errors.ts             # Error → friendly message formatter
-│   ├── firestore.ts          # Firebase Admin SDK init + path helpers
 │   ├── ai/
 │   │   ├── stream.ts         # Interface-agnostic AI streaming core
 │   │   ├── channel.ts        # OutputChannel interface
-│   │   ├── telegram-channel.ts
-│   │   └── firestore-channel.ts
+│   │   └── telegram-channel.ts
 │   ├── bot/
 │   │   ├── instance.ts       # Bot singleton, provider, Markdown→HTML, sendChunked
 │   │   ├── commands.ts       # /command handlers + callback query handlers
@@ -389,8 +375,6 @@ phoebe/
 │   │   ├── conversations.ts  # Conversation history + context windowing
 │   │   ├── settings.ts       # Per-chat model, voice, voice-reply settings
 │   │   └── users.ts          # User profiles
-│   └── web/
-│       └── listener.ts       # Firestore message watcher + instance heartbeat
 ├── Dockerfile                # Node 22 slim + dev tools
 ├── docker-compose.yml        # Container orchestration with persistent volumes
 ├── package.json
@@ -438,22 +422,20 @@ pnpm typecheck          # tsc --noEmit
 | AI Gateway  | [Mume AI](https://mume.ai)                               |
 | Telegram    | [grammY](https://grammy.dev)                             |
 | Persistence | JSON files on disk (Docker volume)                       |
-| Web Sync    | Cloud Firestore (firebase-admin)                         |
 | STT/TTS     | ElevenLabs via [fal.ai](https://fal.ai)                  |
 | Container   | Docker + Docker Compose                                  |
 
 ### Dependencies
 
-7 runtime dependencies. Zero native modules.
+6 runtime dependencies. Zero native modules.
 
 | Package                       | Purpose                                               |
 | ----------------------------- | ----------------------------------------------------- |
 | `grammy`                      | Telegram bot framework                                |
 | `ai`                          | Vercel AI SDK — `streamText`, `tool()`, message types |
 | `@openrouter/ai-sdk-provider` | AI provider SDK (Mume AI gateway)                     |
-| `@ai-sdk/openai-compatible`    | OpenAI-compatible provider (Ollama local models)      |
+| `@ai-sdk/openai-compatible`   | OpenAI-compatible provider (Ollama local models)      |
 | `zod`                         | Schema validation for tool parameters                 |
-| `firebase-admin`              | Firestore server-side SDK                             |
 | `dotenv`                      | Environment variable loading                          |
 | `tsx`                         | TypeScript execution without build step               |
 
