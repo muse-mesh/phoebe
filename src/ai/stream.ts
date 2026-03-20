@@ -156,7 +156,7 @@ export async function runAIStream(opts: {
             }
 
             // Send tool results to user so they see output even if
-            // the model responds with a lazy "(task completed)".
+            // the model responds with a lazy "Executed command".
             const toolResults: any[] = step.toolResults ?? [];
 
             for (const tr of toolResults) {
@@ -287,10 +287,12 @@ export async function runAIStream(opts: {
 
     if (toolStepCount > 0) {
       if (sentTextLength > 0) {
-        fullText = fullText || "(task completed)";
+        fullText = fullText || "Executed command";
       } else {
-        fullText = "(task completed)";
+        fullText = "Executed command";
       }
+      // Reset sentTextLength so the synthetic "Executed command" isn't sliced away
+      sentTextLength = 0;
     } else {
       await channel.sendError(
         `Empty response from ${modelId}. Try switching models or clearing context.`,
