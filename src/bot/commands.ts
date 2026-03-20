@@ -7,7 +7,7 @@ import {
   DEFAULT_MODEL,
   MAX_STEPS,
   OWNER_ID,
-  CATALOG_API_KEY,
+  OPENROUTER_API_KEY,
 } from "../config.js";
 import {
   trackUser,
@@ -129,11 +129,14 @@ export function registerCommands() {
         "/skills - List skills\n" +
         "/models - Browse all models\n" +
         "/model - Switch model\n" +
-        "/session - Manage sessions\n" +
+        "/session - List & switch sessions\n" +
+        "/session new [title] - New session\n" +
+        "/session rename <title> - Rename current\n" +
+        "/session delete <id> - Delete session\n" +
+        "/clear - Clear session history\n" +
         "/voice - Switch TTS voice\n" +
         "/voicereply - Toggle voice replies\n" +
         "/refreshmodels - Update model catalog\n" +
-        "/clear - Clear session history\n" +
         "/restart - Restart bot",
     ),
   );
@@ -192,7 +195,7 @@ export function registerCommands() {
     const info = getCatalogInfo();
     if (info.count === 0) {
       return ctx.reply(
-        "No models in catalog.\n\nSet CATALOG_API_KEY and run /refreshmodels to load models.",
+        "No models in catalog.\n\nSet OPENROUTER_API_KEY and run /refreshmodels to load models.",
       );
     }
     const arg = ctx.message!.text.replace(/^\/models(@\w+)?\s*/, "").trim();
@@ -246,7 +249,7 @@ export function registerCommands() {
       const parts: string[] = [];
 
       // Refresh cloud catalog
-      if (CATALOG_API_KEY) {
+      if (OPENROUTER_API_KEY) {
         await ctx.reply("Refreshing model catalog from Mume AI...");
         const count = await refreshModelCatalog();
         parts.push(`Cloud: ${count} models`);

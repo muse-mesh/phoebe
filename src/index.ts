@@ -14,7 +14,7 @@ process.on("uncaughtException", (err) => {
 
 import {
   DEFAULT_MODEL,
-  MUME_BASE_URL,
+  GATEWAY_URL,
   ALLOWED_IDS,
   DATA_DIR,
   SKILLS_DIR,
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
         const bannerFields: Record<string, string> = {
           bot: `@${botInfo.username} (${botInfo.id})`,
           model: DEFAULT_MODEL,
-          gateway: MUME_BASE_URL,
+          gateway: GATEWAY_URL,
         };
         if (isOllamaEnabled()) {
           bannerFields.ollama = `${OLLAMA_BASE_URL} (${catalogInfo.ollamaCount} models)`;

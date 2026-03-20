@@ -10,7 +10,7 @@ import type { LanguageModel } from "ai";
 import {
   BOT_TOKEN,
   MUME_API_KEY,
-  MUME_BASE_URL,
+  GATEWAY_URL,
   ALLOWED_IDS,
   OLLAMA_BASE_URL,
   isOllamaEnabled,
@@ -23,7 +23,7 @@ import log from "../logger.js";
 const OLLAMA_PREFIX = "ollama/";
 
 export const mumeProvider = createOpenRouter({
-  baseURL: MUME_BASE_URL,
+  baseURL: GATEWAY_URL,
   apiKey: MUME_API_KEY,
   // Disable gzip to prevent Z_DATA_ERROR ("invalid distance too far back")
   // on long SSE streams. Node's undici auto-decompresses gzip, but the

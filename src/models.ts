@@ -6,7 +6,7 @@ import fs from "fs/promises";
 import path from "path";
 import {
   DATA_DIR,
-  CATALOG_API_KEY,
+  OPENROUTER_API_KEY,
   OLLAMA_BASE_URL,
   isOllamaEnabled,
 } from "./config.js";
@@ -72,10 +72,10 @@ export async function loadModelCatalog(): Promise<void> {
       },
     );
   } catch {
-    if (!CATALOG_API_KEY) {
+    if (!OPENROUTER_API_KEY) {
       log.warn(
         "models",
-        "no cached catalog and no CATALOG_API_KEY — cloud catalog empty",
+        "no cached catalog and no OPENROUTER_API_KEY — cloud catalog empty",
       );
       catalog = { fetchedAt: "never", count: 0, models: [] };
     } else {
@@ -135,12 +135,12 @@ export async function loadModelCatalog(): Promise<void> {
 
 /** Fetch fresh model list from Mume AI and save to disk. */
 export async function refreshModelCatalog(): Promise<number> {
-  if (!CATALOG_API_KEY) {
-    throw new Error("CATALOG_API_KEY is required to fetch models");
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY is required to fetch models");
   }
 
   const res = await fetch(`${MUME_CATALOG_API}/models`, {
-    headers: { Authorization: `Bearer ${CATALOG_API_KEY}` },
+    headers: { Authorization: `Bearer ${OPENROUTER_API_KEY}` },
   });
 
   if (!res.ok) {
