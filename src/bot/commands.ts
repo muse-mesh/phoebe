@@ -264,7 +264,7 @@ export function registerCommands() {
 
       if (parts.length === 0) {
         return ctx.reply(
-          "No model sources configured.\nSet MUME_API_KEY for cloud models or OLLAMA_BASE_URL for local models.",
+          "No model sources configured.\nSet GATEWAY_KEY for cloud models or OLLAMA_BASE_URL for local models.",
         );
       }
 

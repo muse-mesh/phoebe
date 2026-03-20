@@ -12,7 +12,7 @@ export const DATA_DIR = process.env.DATA_DIR
   : path.resolve(__dirname, "..", "data");
 
 export const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
-export const MUME_API_KEY = process.env.MUME_API_KEY ?? "";
+export const GATEWAY_KEY = process.env.GATEWAY_KEY ?? "";
 export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 export const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://mume.ai/api/v1";
 export const FAL_API_KEY = process.env.FAL_KEY ?? "";

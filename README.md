@@ -167,11 +167,11 @@ You should see Phoebe connect to Telegram and report her status to the owner.
 
 ### Required
 
-| Variable       | Description                                                      |
-| -------------- | ---------------------------------------------------------------- |
-| `BOT_TOKEN`    | Telegram bot token from [@BotFather](https://t.me/BotFather)     |
-| `MUME_API_KEY` | API key from [mume.ai](https://mume.ai)                          |
-| `OWNER_ID`     | Your Telegram user ID (for startup notifications and `/restart`) |
+| Variable      | Description                                                      |
+| ------------- | ---------------------------------------------------------------- |
+| `BOT_TOKEN`   | Telegram bot token from [@BotFather](https://t.me/BotFather)     |
+| `GATEWAY_KEY` | API key for the gateway (Mume AI or OpenRouter)                  |
+| `OWNER_ID`    | Your Telegram user ID (for startup notifications and `/restart`) |
 
 ### Optional
 

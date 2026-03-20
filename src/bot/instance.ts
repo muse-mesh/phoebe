@@ -9,7 +9,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import {
   BOT_TOKEN,
-  MUME_API_KEY,
+  GATEWAY_KEY,
   GATEWAY_URL,
   ALLOWED_IDS,
   OLLAMA_BASE_URL,
@@ -24,7 +24,7 @@ const OLLAMA_PREFIX = "ollama/";
 
 export const mumeProvider = createOpenRouter({
   baseURL: GATEWAY_URL,
-  apiKey: MUME_API_KEY,
+  apiKey: GATEWAY_KEY,
   // Disable gzip to prevent Z_DATA_ERROR ("invalid distance too far back")
   // on long SSE streams. Node's undici auto-decompresses gzip, but the
   // compressed data can corrupt mid-stream through proxies/gateways.
