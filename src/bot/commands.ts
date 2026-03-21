@@ -7,7 +7,7 @@ import {
   DEFAULT_MODEL,
   MAX_STEPS,
   OWNER_ID,
-  OPENROUTER_API_KEY,
+  OR_API_KEY,
 } from "../config.js";
 import {
   trackUser,
@@ -195,7 +195,7 @@ export function registerCommands() {
     const info = getCatalogInfo();
     if (info.count === 0) {
       return ctx.reply(
-        "No models in catalog.\n\nSet OPENROUTER_API_KEY and run /refreshmodels to load models.",
+        "No models in catalog.\n\nSet OR_API_KEY and run /refreshmodels to load models.",
       );
     }
     const arg = ctx.message!.text.replace(/^\/models(@\w+)?\s*/, "").trim();
@@ -249,7 +249,7 @@ export function registerCommands() {
       const parts: string[] = [];
 
       // Refresh cloud catalog
-      if (OPENROUTER_API_KEY) {
+      if (OR_API_KEY) {
         await ctx.reply("Refreshing model catalog from Mume AI...");
         const count = await refreshModelCatalog();
         parts.push(`Cloud: ${count} models`);
