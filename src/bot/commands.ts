@@ -3,12 +3,7 @@
 
 import fs from "fs/promises";
 import { InlineKeyboard } from "grammy";
-import {
-  DEFAULT_MODEL,
-  MAX_STEPS,
-  OWNER_ID,
-  OR_API_KEY,
-} from "../config.js";
+import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID, OR_API_KEY } from "../config.js";
 import {
   trackUser,
   getChatModel,

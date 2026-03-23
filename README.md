@@ -175,14 +175,14 @@ You should see Phoebe connect to Telegram and report her status to the owner.
 
 ### Optional
 
-| Variable             | Default                         | Description                                            |
-| -------------------- | ------------------------------- | ------------------------------------------------------ |
-| `GATEWAY_URL`        | `https://mume.ai/api/v1`        | OpenAI-compatible gateway (Mume AI, OpenRouter, etc.)  |
-| `OR_API_KEY`         | —                               | OpenRouter API key for fetching the model catalog      |
-| `AI_MODEL`           | `google/gemini-3-flash-preview` | Default model (`provider/model` format)                |
-| `MAX_STEPS`          | `25`                            | Max tool-call steps per message                        |
-| `ALLOWED_IDS`        | _(empty = everyone)_            | Comma-separated Telegram user IDs for access control   |
-| `FAL_KEY`            | —                               | [fal.ai](https://fal.ai) API key for voice (STT + TTS) |
+| Variable      | Default                         | Description                                            |
+| ------------- | ------------------------------- | ------------------------------------------------------ |
+| `GATEWAY_URL` | `https://mume.ai/api/v1`        | OpenAI-compatible gateway (Mume AI, OpenRouter, etc.)  |
+| `OR_API_KEY`  | —                               | OpenRouter API key for fetching the model catalog      |
+| `AI_MODEL`    | `google/gemini-3-flash-preview` | Default model (`provider/model` format)                |
+| `MAX_STEPS`   | `25`                            | Max tool-call steps per message                        |
+| `ALLOWED_IDS` | _(empty = everyone)_            | Comma-separated Telegram user IDs for access control   |
+| `FAL_KEY`     | —                               | [fal.ai](https://fal.ai) API key for voice (STT + TTS) |
 
 ### Ollama (Optional — Local Models)
 

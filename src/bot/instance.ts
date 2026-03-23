@@ -65,14 +65,8 @@ export function resolveProvider(modelId: string): LanguageModel {
     return ollamaProvider.chatModel(ollamaModelName(modelId));
   }
 
-  // Route via Mume AI — hint the provider slug for lower latency
-  const providerSlug = modelId.split("/")[0];
-  return mumeProvider(modelId, {
-    provider: {
-      order: [providerSlug],
-      allow_fallbacks: true,
-    },
-  });
+  // Route via gateway
+  return mumeProvider.chatModel(modelId);
 }
 
 // ── Bot Instance ─────────────────────────────────────────────────────────────
