@@ -34,6 +34,7 @@ import {
   getModelsPage,
   refreshModelCatalog,
   refreshOllamaModels,
+  refreshLMStudioModels,
   getCatalogInfo,
   findModel,
   formatPrice,
@@ -41,9 +42,9 @@ import {
   getModelCapabilities,
 } from "../models.js";
 import { getSkillCount, discoverSkills } from "../tools.js";
-import { bot, startedAt, isOllamaModel } from "./instance.js";
+import { bot, startedAt, isOllamaModel, isLMStudioModel } from "./instance.js";
 import { toolNames } from "./handlers.js";
-import { isOllamaEnabled } from "../config.js";
+import { isOllamaEnabled, isLMStudioEnabled } from "../config.js";
 import log from "../logger.js";
 
 // ── Model Browsing Helpers ───────────────────────────────────────────────────
@@ -64,18 +65,21 @@ function formatAge(isoDate: string): string {
 function buildModelsMessage(
   chatId: number,
   page: number,
-  options?: { filter?: string; ollamaOnly?: boolean },
+  options?: { filter?: string; ollamaOnly?: boolean; lmstudioOnly?: boolean },
 ): { text: string; keyboard: InlineKeyboard } {
   const current = getChatModel(chatId);
   const result = getModelsPage(page, {
     filter: options?.filter,
     ollamaOnly: options?.ollamaOnly,
+    lmstudioOnly: options?.lmstudioOnly,
   });
   const label = options?.ollamaOnly
     ? "\u{1F4BB} Ollama Models (Local)"
-    : options?.filter
-      ? `Models matching "${options.filter}"`
-      : "Models";
+    : options?.lmstudioOnly
+      ? "\u{1F4BB} LM Studio Models (Local)"
+      : options?.filter
+        ? `Models matching "${options.filter}"`
+        : "Models";
 
   let text = `${label} (${result.total}) \u00b7 Page ${result.page}/${result.totalPages}\n\n`;
 
@@ -83,7 +87,11 @@ function buildModelsMessage(
     const active = m.id === current ? " \u2713" : "";
     const price = formatPrice(m.pricing);
     const ctxLen = formatContextLength(m.context_length);
-    const source = m.id.startsWith("ollama/") ? "\u{1F4BB}" : "\u2601\uFE0F";
+    const source = m.id.startsWith("ollama/")
+      ? "\u{1F4BB}"
+      : m.id.startsWith("lmstudio/")
+        ? "\u{1F5A5}\uFE0F"
+        : "\u2601\uFE0F";
     text += `${source} ${m.id}${active}\n  ${m.name} | ${ctxLen} ctx | ${price}\n\n`;
   }
 
@@ -91,6 +99,7 @@ function buildModelsMessage(
 
   const buildCb = (p: number) => {
     if (options?.ollamaOnly) return `mo:${p}`;
+    if (options?.lmstudioOnly) return `ml:${p}`;
     if (options?.filter) return `ms:${p}:${options.filter.slice(0, 40)}`;
     return `m:${p}`;
   };
@@ -100,12 +109,14 @@ function buildModelsMessage(
   kb.text(`${result.page}/${result.totalPages}`, "noop");
   if (result.page < result.totalPages)
     kb.text("Next \u25b6", buildCb(result.page + 1));
-  if (isOllamaEnabled()) {
-    if (!options?.ollamaOnly) {
-      kb.row().text("\u{1F4BB} Ollama Only", "mo:1");
-    } else {
-      kb.row().text("\u{1F4CB} All Models", "m:1");
-    }
+  if (isOllamaEnabled() && !options?.ollamaOnly) {
+    kb.row().text("\u{1F4BB} Ollama Only", "mo:1");
+  }
+  if (isLMStudioEnabled() && !options?.lmstudioOnly) {
+    kb.row().text("\u{1F5A5}\uFE0F LM Studio Only", "ml:1");
+  }
+  if (options?.ollamaOnly || options?.lmstudioOnly) {
+    kb.row().text("\u{1F4CB} All Models", "m:1");
   }
 
   return { text, keyboard: kb };
@@ -149,6 +160,9 @@ export function registerCommands() {
     const ollamaLine = isOllamaEnabled()
       ? `\nOllama: ${catalogInfo.ollamaCount} local models`
       : "";
+    const lmstudioLine = isLMStudioEnabled()
+      ? `\nLM Studio: ${catalogInfo.lmstudioCount} local models`
+      : "";
     const session = await getActiveSession(ctx.chat.id);
     const { sessions } = await listSessions(ctx.chat.id);
     return ctx.reply(
@@ -156,10 +170,10 @@ export function registerCommands() {
         `Uptime: ${h}h ${m}m ${s}s\n` +
         `RAM: ${rss}MB RSS / ${heap}MB heap\n` +
         `Node: ${process.version}\n` +
-        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : ""}\n` +
+        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : isLMStudioModel(currentModel) ? " (local)" : ""}\n` +
         `Session: ${session.title} (${sessions.length} total)\n` +
         `Voice Reply: ${isVoiceReplyEnabled(ctx.chat.id) ? "on" : "off"}\n` +
-        `Catalog: ${catalogInfo.count} models${ollamaLine}\n` +
+        `Catalog: ${catalogInfo.count} models${ollamaLine}${lmstudioLine}\n` +
         `Tools: ${toolNames.length}\n` +
         `Skills: ${getSkillCount()}\n` +
         `Max steps: ${MAX_STEPS}\n` +
@@ -195,10 +209,12 @@ export function registerCommands() {
     }
     const arg = ctx.message!.text.replace(/^\/models(@\w+)?\s*/, "").trim();
     const ollamaOnly = arg.toLowerCase() === "ollama";
-    const filter = ollamaOnly ? undefined : arg || undefined;
+    const lmstudioOnly = arg.toLowerCase() === "lmstudio";
+    const filter = ollamaOnly || lmstudioOnly ? undefined : arg || undefined;
     const { text, keyboard } = buildModelsMessage(ctx.chat.id, 1, {
       filter,
       ollamaOnly,
+      lmstudioOnly,
     });
     return ctx.reply(text, { reply_markup: keyboard });
   });
@@ -257,9 +273,16 @@ export function registerCommands() {
         parts.push(`Ollama: ${count} local models`);
       }
 
+      // Refresh LM Studio models
+      if (isLMStudioEnabled()) {
+        await ctx.reply("Refreshing local models from LM Studio...");
+        const count = await refreshLMStudioModels();
+        parts.push(`LM Studio: ${count} local models`);
+      }
+
       if (parts.length === 0) {
         return ctx.reply(
-          "No model sources configured.\nSet GATEWAY_KEY for cloud models or OLLAMA_BASE_URL for local models.",
+          "No model sources configured.\nSet GATEWAY_KEY for cloud models, OLLAMA_BASE_URL for Ollama, or LMSTUDIO_BASE_URL for LM Studio.",
         );
       }
 
@@ -426,11 +449,14 @@ export function registerCommands() {
     }
 
     let page: number;
-    let options: { filter?: string; ollamaOnly?: boolean } = {};
+    let options: { filter?: string; ollamaOnly?: boolean; lmstudioOnly?: boolean } = {};
 
     if (data.startsWith("mo:")) {
       page = parseInt(data.slice(3));
       options.ollamaOnly = true;
+    } else if (data.startsWith("ml:")) {
+      page = parseInt(data.slice(3));
+      options.lmstudioOnly = true;
     } else if (data.startsWith("ms:")) {
       const rest = data.slice(3);
       const colonIdx = rest.indexOf(":");

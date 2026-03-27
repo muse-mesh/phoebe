@@ -21,6 +21,8 @@ import {
   BOT_TOKEN,
   OLLAMA_BASE_URL,
   isOllamaEnabled,
+  LMSTUDIO_BASE_URL,
+  isLMStudioEnabled,
 } from "./config.js";
 import {
   ensureDataDir,
@@ -59,6 +61,9 @@ async function main(): Promise<void> {
         };
         if (isOllamaEnabled()) {
           bannerFields.ollama = `${OLLAMA_BASE_URL} (${catalogInfo.ollamaCount} models)`;
+        }
+        if (isLMStudioEnabled()) {
+          bannerFields.lmstudio = `${LMSTUDIO_BASE_URL} (${catalogInfo.lmstudioCount} models)`;
         }
         Object.assign(bannerFields, {
           allowlist:

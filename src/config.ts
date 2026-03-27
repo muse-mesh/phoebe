@@ -26,6 +26,11 @@ export const OWNER_ID = parseInt(process.env.OWNER_ID ?? "0", 10);
 export const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "";
 export const isOllamaEnabled = (): boolean => OLLAMA_BASE_URL.length > 0;
 
+// ── LM Studio (optional — local model inference) ─────────────────────────────
+
+export const LMSTUDIO_BASE_URL = process.env.LMSTUDIO_BASE_URL ?? "";
+export const isLMStudioEnabled = (): boolean => LMSTUDIO_BASE_URL.length > 0;
+
 export const ALLOWED_IDS: number[] = process.env.ALLOWED_IDS
   ? process.env.ALLOWED_IDS.split(",").map(Number)
   : [];

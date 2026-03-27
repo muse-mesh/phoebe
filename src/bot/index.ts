@@ -6,8 +6,10 @@ export {
   bot,
   mumeProvider,
   ollamaProvider,
+  lmstudioProvider,
   resolveProvider,
   isOllamaModel,
+  isLMStudioModel,
   startedAt,
   sendChunked,
   downloadTelegramFile,
@@ -18,8 +20,8 @@ import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID } from "../config.js";
 import { getCatalogInfo } from "../models.js";
 import { getSkillCount } from "../tools.js";
 import { getChatModel } from "../persistence/index.js";
-import { isOllamaModel } from "./instance.js";
-import { isOllamaEnabled } from "../config.js";
+import { isOllamaModel, isLMStudioModel } from "./instance.js";
+import { isOllamaEnabled, isLMStudioEnabled } from "../config.js";
 import log from "../logger.js";
 
 // ── Register all handlers ────────────────────────────────────────────────────
@@ -41,13 +43,16 @@ export async function notifyOwner(): Promise<void> {
     const ollamaLine = isOllamaEnabled()
       ? `\nOllama: ${catalogInfo.ollamaCount} local models`
       : "";
+    const lmstudioLine = isLMStudioEnabled()
+      ? `\nLM Studio: ${catalogInfo.lmstudioCount} local models`
+      : "";
     await bot.api.sendMessage(
       OWNER_ID,
       `Phoebe is online!\n` +
-        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : ""}\n` +
+        `Model: ${currentModel}${isOllamaModel(currentModel) ? " (local)" : isLMStudioModel(currentModel) ? " (local)" : ""}\n` +
         `Tools: ${toolNames.join(", ")}\n` +
         `Skills: ${getSkillCount()}\n` +
-        `Catalog: ${catalogInfo.count} models${ollamaLine}\n` +
+        `Catalog: ${catalogInfo.count} models${ollamaLine}${lmstudioLine}\n` +
         `Max steps: ${MAX_STEPS}\n` +
         `Node: ${process.version}`,
     );

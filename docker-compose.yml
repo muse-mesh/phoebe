@@ -11,6 +11,8 @@ services:
     volumes:
       - phoebe-data:/app/data
       - phoebe-skills:/app/skills
+    ports:
+      - "8080:8080"
 
 volumes:
   phoebe-data:
