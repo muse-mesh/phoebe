@@ -25,4 +25,7 @@ ENV NODE_ENV=production
 ENV DATA_DIR=/app/data
 ENV SKILLS_DIR=/app/skills
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
 CMD ["pnpm", "start"]

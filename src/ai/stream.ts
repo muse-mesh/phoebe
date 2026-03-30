@@ -152,16 +152,16 @@ export async function runAIStream(opts: {
 
             // Log each tool call
             for (const tc of toolCalls) {
-              log.toolCall(tc.toolName, (tc as any).args ?? {});
+              log.toolCall(tc.toolName, (tc.input ?? {}) as Record<string, unknown>);
             }
 
             // Send tool results to user so they see output even if
             // the model responds with a lazy "Executed command".
-            const toolResults: any[] = step.toolResults ?? [];
+            const toolResults = step.toolResults ?? [];
 
             for (const tr of toolResults) {
               const toolName: string = tr.toolName ?? "tool";
-              const res = tr.output ?? tr.result;
+              const res = tr.output;
               const resultStr =
                 res === undefined || res === null
                   ? "(no result)"

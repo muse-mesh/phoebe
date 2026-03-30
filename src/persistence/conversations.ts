@@ -5,7 +5,7 @@
 // For the model context window we slice the last MAX_CONTEXT_MESSAGES and
 // truncate old tool results outside the RECENT_FULL_TOOLS window.
 
-import type { ModelMessage, ToolModelMessage, UserContent } from "ai";
+import type { ModelMessage, ToolModelMessage, UserContent, TextPart, FilePart, ToolCallPart, ToolResultPart } from "ai";
 import { DATA_DIR } from "../config.js";
 import { saveJSON, loadJSON } from "./store.js";
 import path from "path";
@@ -25,6 +25,20 @@ export const RECENT_FULL_TOOLS = 30;
 /** Max chars for truncated tool-result output in older messages. */
 const MAX_TOOL_RESULT_LENGTH = 10_000;
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Extract plain text from a user message (handles string and array content). */
+function extractUserText(msg: ModelMessage): string {
+  if (typeof msg.content === "string") return msg.content;
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .filter((p): p is TextPart => p.type === "text")
+      .map((p) => p.text)
+      .join(" ");
+  }
+  return "";
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 // Key: "chatId_sessionId"
 
@@ -40,9 +54,11 @@ export function convPath(chatId: number, sessionId: string): string {
 
 // ── Migration ────────────────────────────────────────────────────────────────
 
-function migrateMessage(msg: any): ModelMessage {
-  if (msg.role === "tool" && Array.isArray(msg.content)) return msg;
-  if (msg.role === "assistant" && Array.isArray(msg.content)) return msg;
+function migrateMessage(msg: Record<string, unknown>): ModelMessage {
+  if (msg.role === "tool" && Array.isArray(msg.content))
+    return msg as unknown as ModelMessage;
+  if (msg.role === "assistant" && Array.isArray(msg.content))
+    return msg as unknown as ModelMessage;
 
   const content = typeof msg.content === "string" ? msg.content : "";
   if (msg.role === "system") return { role: "system", content };
@@ -58,7 +74,7 @@ async function loadConversation(
 ): Promise<ModelMessage[]> {
   const key = convKey(chatId, sessionId);
   if (conversations.has(key)) return conversations.get(key)!;
-  const data = await loadJSON<unknown[]>(convPath(chatId, sessionId));
+  const data = await loadJSON<Record<string, unknown>[]>(convPath(chatId, sessionId));
   const history = Array.isArray(data) ? data.map(migrateMessage) : [];
   conversations.set(key, history);
   return history;
@@ -83,7 +99,7 @@ export async function saveConversation(
         return { type: "text" as const, text: "[image]" };
       }
       if (part.type === "file") {
-        const name = (part as any).filename ?? "file";
+        const name = (part as FilePart).filename ?? "file";
         return { type: "text" as const, text: `[file: ${name}]` };
       }
       return part;
@@ -154,7 +170,114 @@ export async function getContextMessages(
     }
   }
 
-  return recent;
+  // ── Sanitize message sequence for model compatibility ────────────────────
+  // Many models (especially local ones like Qwen via LM Studio) enforce
+  // strict message ordering via jinja templates:
+  //   1. assistant (with tool-call) must be followed by tool (with results)
+  //   2. tool results must be followed by assistant (not user)
+  //   3. consecutive user messages are invalid — must alternate user/assistant
+  //
+  // Corruption happens when the AI stream errors/times out mid-conversation,
+  // leaving orphaned tool calls or missing assistant responses, and when
+  // users send multiple messages before the bot can reply.
+
+  // Collect all tool-result IDs so we can detect orphaned tool calls
+  const toolResultIds = new Set<string>();
+  for (const msg of recent) {
+    if (msg.role === "tool" && Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part.type === "tool-result" && (part as ToolResultPart).toolCallId) {
+          toolResultIds.add((part as ToolResultPart).toolCallId);
+        }
+      }
+    }
+  }
+
+  // Pass 1: Fix structural issues (orphaned tool calls, missing assistants)
+  const pass1: ModelMessage[] = [];
+  for (let i = 0; i < recent.length; i++) {
+    const msg = recent[i];
+    pass1.push(msg);
+
+    // Fix orphaned tool calls — assistant has tool-call but no tool-result follows
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      const orphanedCalls = msg.content.filter(
+        (part): part is ToolCallPart =>
+          part.type === "tool-call" &&
+          !!(part as ToolCallPart).toolCallId &&
+          !toolResultIds.has((part as ToolCallPart).toolCallId),
+      );
+      if (orphanedCalls.length > 0) {
+        const next = recent[i + 1];
+        if (!next || next.role !== "tool") {
+          pass1.push({
+            role: "tool",
+            content: orphanedCalls.map((call) => ({
+              type: "tool-result" as const,
+              toolCallId: call.toolCallId,
+              toolName: call.toolName,
+              result: "(error: tool call failed or timed out)",
+              output: [
+                {
+                  type: "text" as const,
+                  value: "(error: tool call failed or timed out)",
+                },
+              ],
+            })),
+          } as unknown as ToolModelMessage);
+          pass1.push({
+            role: "assistant",
+            content: "(The previous tool call failed. Continuing...)",
+          } as ModelMessage);
+          log.warn("persist", "patched orphaned tool calls", {
+            chatId,
+            count: orphanedCalls.length,
+          });
+        }
+      }
+    }
+
+    // Fix missing assistant after tool result
+    if (msg.role === "tool") {
+      const next = recent[i + 1];
+      if (next && next.role !== "assistant") {
+        pass1.push({
+          role: "assistant",
+          content: "(Continuing after tool execution.)",
+        } as ModelMessage);
+      }
+    }
+  }
+
+  // Pass 2: Merge consecutive user messages into a single message.
+  // Models expect strict user/assistant alternation. When a user sends
+  // multiple messages before the bot responds, we concatenate them.
+  const sanitized: ModelMessage[] = [];
+  for (const msg of pass1) {
+    const prev = sanitized[sanitized.length - 1];
+    if (msg.role === "user" && prev?.role === "user") {
+      // Merge: extract text from both and combine
+      const prevText = extractUserText(prev);
+      const curText = extractUserText(msg);
+      sanitized[sanitized.length - 1] = {
+        role: "user",
+        content: [{ type: "text" as const, text: `${prevText}\n${curText}` }],
+      } as ModelMessage;
+    } else {
+      sanitized.push(msg);
+    }
+  }
+
+  // Log if we patched anything
+  if (sanitized.length !== recent.length) {
+    log.warn("persist", "sanitized conversation for model compat", {
+      chatId,
+      before: recent.length,
+      after: sanitized.length,
+    });
+  }
+
+  return sanitized;
 }
 
 // ── Mutators ─────────────────────────────────────────────────────────────────

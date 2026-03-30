@@ -9,11 +9,14 @@ import {
   OR_API_KEY,
   OLLAMA_BASE_URL,
   isOllamaEnabled,
+  LMSTUDIO_BASE_URL,
+  isLMStudioEnabled,
 } from "./config.js";
 import log from "./logger.js";
 
 const MODELS_FILE = path.join(DATA_DIR, "openrouter-models.json");
 const OLLAMA_MODELS_FILE = path.join(DATA_DIR, "ollama-models.json");
+const LMSTUDIO_MODELS_FILE = path.join(DATA_DIR, "lmstudio-models.json");
 const MUME_CATALOG_API = "https://openrouter.ai/api/v1";
 const PAGE_SIZE = 15;
 
@@ -51,10 +54,60 @@ interface ModelCatalog {
   models: AIModel[];
 }
 
+/** Raw model entry from the Mume AI / OpenRouter catalog API. */
+interface CatalogModelRaw {
+  id: string;
+  name: string;
+  created?: number;
+  description?: string;
+  context_length?: number | null;
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    image?: string;
+    request?: string;
+  };
+  architecture?: {
+    input_modalities?: string[];
+    output_modalities?: string[];
+    tokenizer?: string;
+    instruct_type?: string | null;
+  };
+  supported_parameters?: string[];
+  top_provider?: {
+    context_length?: number | null;
+    max_completion_tokens?: number | null;
+    is_moderated?: boolean;
+  };
+}
+
+/** Raw model entry from the Ollama /api/tags endpoint. */
+interface OllamaModelRaw {
+  name?: string;
+  model?: string;
+  size?: number;
+  modified_at?: string;
+  details?: {
+    parameter_size?: string;
+    quantization_level?: string;
+    family?: string;
+    families?: string[];
+    format?: string;
+  };
+}
+
+/** Raw model entry from LM Studio (OpenAI-compatible). */
+interface LMStudioModelRaw {
+  id?: string;
+  model?: string;
+  created?: number;
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 let catalog: ModelCatalog | null = null;
 let ollamaCatalog: ModelCatalog | null = null;
+let lmstudioCatalog: ModelCatalog | null = null;
 
 // ── Load / Refresh ───────────────────────────────────────────────────────────
 
@@ -131,6 +184,52 @@ export async function loadModelCatalog(): Promise<void> {
       }
     }
   }
+
+  // Load LM Studio catalog from disk (if enabled)
+  if (isLMStudioEnabled()) {
+    try {
+      const raw = await fs.readFile(LMSTUDIO_MODELS_FILE, "utf-8");
+      lmstudioCatalog = JSON.parse(raw) as ModelCatalog;
+      log.info(
+        "models",
+        `loaded ${lmstudioCatalog.models.length} LM Studio models from disk`,
+        { fetched: lmstudioCatalog.fetchedAt },
+      );
+    } catch {
+      log.info(
+        "models",
+        "no cached LM Studio catalog, fetching from local server…",
+      );
+
+      const maxAttempts = 4;
+      let loaded = false;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          await refreshLMStudioModels();
+          loaded = true;
+          break;
+        } catch (err) {
+          log.warn(
+            "models",
+            `LM Studio fetch attempt ${attempt}/${maxAttempts} failed`,
+            {
+              err: (err as Error).message,
+            },
+          );
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, attempt * 2000));
+          }
+        }
+      }
+      if (!loaded) {
+        log.warn(
+          "models",
+          "LM Studio unreachable after retries — will retry on /refreshmodels",
+        );
+        lmstudioCatalog = { fetchedAt: "never", count: 0, models: [] };
+      }
+    }
+  }
 }
 
 /** Fetch fresh model list from Mume AI and save to disk. */
@@ -150,9 +249,9 @@ export async function refreshModelCatalog(): Promise<number> {
     );
   }
 
-  const data = (await res.json()) as { data: any[] };
+  const data = (await res.json()) as { data: CatalogModelRaw[] };
 
-  const models: AIModel[] = (data.data ?? []).map((m: any) => ({
+  const models: AIModel[] = (data.data ?? []).map((m) => ({
     id: m.id,
     name: m.name,
     created: m.created ?? 0,
@@ -206,9 +305,9 @@ export async function refreshOllamaModels(): Promise<number> {
     throw new Error(`Ollama API error ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = (await res.json()) as { models?: any[] };
+  const data = (await res.json()) as { models?: OllamaModelRaw[] };
 
-  const models: AIModel[] = (data.models ?? []).map((m: any) => {
+  const models: AIModel[] = (data.models ?? []).map((m) => {
     const sizeGB = m.size ? (m.size / 1_073_741_824).toFixed(1) : "?";
     const paramCount = m.details?.parameter_size ?? "";
     const quant = m.details?.quantization_level ?? "";
@@ -255,13 +354,83 @@ export async function refreshOllamaModels(): Promise<number> {
   return models.length;
 }
 
+// ── LM Studio ────────────────────────────────────────────────────────────────
+
+/** Fetch local models from LM Studio and save to disk. */
+export async function refreshLMStudioModels(): Promise<number> {
+  if (!isLMStudioEnabled()) {
+    throw new Error("LM Studio is not configured (set LMSTUDIO_BASE_URL)");
+  }
+
+  const baseUrl = LMSTUDIO_BASE_URL.replace(/\/+$/, "");
+  const url = `${baseUrl}/v1/models`;
+  log.info("models", `fetching LM Studio models from ${url}`);
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `LM Studio API error ${res.status}: ${body.slice(0, 200)}`,
+    );
+  }
+
+  const raw = await res.json();
+  // LM Studio returns OpenAI-compatible format: { data: [...] }
+  // but also accept top-level array just in case
+  const rawModels: LMStudioModelRaw[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw.data)
+      ? raw.data
+      : [];
+
+  log.info("models", `LM Studio returned ${rawModels.length} model entries`);
+
+  const models: AIModel[] = rawModels.map((m) => {
+    const modelId = m.id ?? m.model ?? "unknown";
+    return {
+      id: `lmstudio/${modelId}`,
+      name: modelId,
+      created: m.created ?? 0,
+      description: `Local LM Studio model — ${modelId}`,
+      context_length: null,
+      pricing: { prompt: "0", completion: "0" },
+      architecture: {
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        tokenizer: undefined,
+        instruct_type: null,
+      },
+      supported_parameters: ["tools", "temperature", "top_p", "top_k"],
+      top_provider: {
+        context_length: null,
+        max_completion_tokens: null,
+        is_moderated: false,
+      },
+    };
+  });
+
+  lmstudioCatalog = {
+    fetchedAt: new Date().toISOString(),
+    count: models.length,
+    models,
+  };
+
+  await fs.writeFile(
+    LMSTUDIO_MODELS_FILE,
+    JSON.stringify(lmstudioCatalog, null, 2),
+  );
+  log.info("models", `fetched and saved ${models.length} LM Studio models`);
+  return models.length;
+}
+
 // ── Queries ──────────────────────────────────────────────────────────────────
 
-/** All models from both catalogs merged. Ollama models appear first. */
+/** All models from all catalogs merged. Local models appear first. */
 function allModels(): AIModel[] {
   const ollama = ollamaCatalog?.models ?? [];
+  const lmstudio = lmstudioCatalog?.models ?? [];
   const cloud = catalog?.models ?? [];
-  return [...ollama, ...cloud];
+  return [...ollama, ...lmstudio, ...cloud];
 }
 
 /** All models in the catalog. */
@@ -274,18 +443,23 @@ export function getCatalogInfo(): {
   fetchedAt: string;
   count: number;
   ollamaCount: number;
+  lmstudioCount: number;
 } {
   return {
     fetchedAt: catalog?.fetchedAt ?? "never",
-    count: (catalog?.models.length ?? 0) + (ollamaCatalog?.models.length ?? 0),
+    count:
+      (catalog?.models.length ?? 0) +
+      (ollamaCatalog?.models.length ?? 0) +
+      (lmstudioCatalog?.models.length ?? 0),
     ollamaCount: ollamaCatalog?.models.length ?? 0,
+    lmstudioCount: lmstudioCatalog?.models.length ?? 0,
   };
 }
 
 /** Paginated model listing, sorted by created desc (latest first). */
 export function getModelsPage(
   page: number,
-  options?: { pageSize?: number; filter?: string; ollamaOnly?: boolean },
+  options?: { pageSize?: number; filter?: string; ollamaOnly?: boolean; lmstudioOnly?: boolean },
 ): {
   models: AIModel[];
   page: number;
@@ -306,6 +480,10 @@ export function getModelsPage(
 
   if (options?.ollamaOnly) {
     models = models.filter((m) => m.id.startsWith("ollama/"));
+  }
+
+  if (options?.lmstudioOnly) {
+    models = models.filter((m) => m.id.startsWith("lmstudio/"));
   }
 
   // Sort by created descending (latest first)

@@ -2,7 +2,6 @@
 // Core streaming handler for all message types (text, photo, document, voice).
 // Delegates AI streaming to the shared ai/stream module via TelegramChannel.
 
-import { InputFile } from "grammy";
 import type { Context } from "grammy";
 import type { UserContent } from "ai";
 import { speechToText } from "../stt.js";
@@ -29,6 +28,7 @@ import {
   runAIStream,
   toolNames as aiToolNames,
 } from "../ai/index.js";
+import { RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW_MS } from "../config.js";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,21 @@ export const toolNames = aiToolNames;
 // the in-flight request is aborted so the bot doesn't get stuck.
 const inflightRequests = new Map<number, AbortController>();
 
+// ── Rate Limiting ────────────────────────────────────────────────────────────
+
+const rateLimitBuckets = new Map<number, number[]>();
+
+function isRateLimited(chatId: number): boolean {
+  if (RATE_LIMIT_MESSAGES <= 0) return false;
+  const now = Date.now();
+  const timestamps = rateLimitBuckets.get(chatId) ?? [];
+  const window = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (window.length >= RATE_LIMIT_MESSAGES) return true;
+  window.push(now);
+  rateLimitBuckets.set(chatId, window);
+  return false;
+}
+
 export async function handleAIMessage(
   ctx: Context,
   userContent: UserContent,
@@ -50,6 +65,13 @@ export async function handleAIMessage(
   const chatId = ctx.chat!.id;
   const userName = getUserName(ctx.from ?? undefined);
   const channel = new TelegramChannel(ctx);
+
+  // Rate limiting
+  if (isRateLimited(chatId)) {
+    log.warn("bot", "rate limited", { chat: chatId });
+    await ctx.reply("You're sending messages too fast. Please wait a moment.");
+    return;
+  }
 
   // Abort any in-flight request for this chat
   const existing = inflightRequests.get(chatId);

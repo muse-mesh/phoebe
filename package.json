@@ -26,7 +26,11 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx --watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.35",
@@ -39,6 +43,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.8.0"
+    "eslint": "^9.0.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.0.0"
   }
 }

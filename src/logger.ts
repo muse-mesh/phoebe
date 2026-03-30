@@ -12,13 +12,16 @@
 //   • Pretty startup banner with system info
 //   • Section separators for visual grouping
 //   • Safe — falls back gracefully if terminal lacks color support
+//   • Optional JSON output (set JSON_LOGGING=true)
+
+const JSON_MODE = process.env.JSON_LOGGING === "true";
 
 // ── ANSI Escape Codes ────────────────────────────────────────────────────────
 
 const R = "\x1b[0m"; // reset
 const B = "\x1b[1m"; // bold
 const D = "\x1b[2m"; // dim
-const U = "\x1b[4m"; // underline
+const _U = "\x1b[4m"; // underline (reserved)
 
 const FG = {
   red: "\x1b[31m",
@@ -111,6 +114,23 @@ function emit(
   meta?: Record<string, unknown>,
   extra?: unknown[],
 ): void {
+  if (JSON_MODE) {
+    const entry: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      level,
+      mod,
+      msg: message,
+      ...meta,
+    };
+    if (extra && extra.length > 0) {
+      entry.extra = extra.map((e) =>
+        e instanceof Error ? { message: e.message, stack: e.stack } : e,
+      );
+    }
+    console.log(JSON.stringify(entry));
+    return;
+  }
+
   const line = `${ts()}  ${fmtLevel(level)}  ${fmtMod(mod)} ${message}${fmtMeta(meta)}`;
 
   const fn =

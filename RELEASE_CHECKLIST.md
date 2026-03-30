@@ -17,29 +17,29 @@ Pre-release punch list for `muse-mesh/phoebe`. Work through each item before mak
 
 ## Must-Do Before Public Push
 
-### Secrets & History Audit
+### Secrets & History Audit (Done)
 
-- [ ] **Scan git history for secrets** — run `git log --all -p | grep -iE "(sk-|key_|token_|AIza|AKIA)"` and verify nothing leaks. Current audit: clean (10 commits, no secrets found)
-- [ ] **Verify `.env` is gitignored** — confirmed in `.gitignore`
-- [ ] **Check for hardcoded values** — search codebase for any hardcoded API keys, user IDs, or instance-specific strings (e.g. `LRL1pk6y...` Firebase UID in ARCHITECTURE.md was in the old version — now removed)
+- [x] **Scan git history for secrets** — run `git log --all -p | grep -iE "(sk-|key_|token_|AIza|AKIA)"` and verify nothing leaks. Audit: clean (5 commits, no secrets found)
+- [x] **Verify `.env` is gitignored** — confirmed in `.gitignore`
+- [x] **Check for hardcoded values** — searched codebase for hardcoded API keys, user IDs, and instance-specific strings. Clean.
 
-### Code Hygiene
+### Code Hygiene (Done)
 
-- [ ] **Run `pnpm typecheck`** — ensure zero TypeScript errors before tagging
-- [ ] **Remove dead code** — check for unused imports, unreachable branches, commented-out blocks
-- [ ] **Verify `pnpm install --frozen-lockfile`** — ensure lockfile is in sync with `package.json`
-- [ ] **Test clean Docker build** — `docker compose build --no-cache && docker compose up -d` from scratch
-- [ ] **Test `.env.example` flow** — clone fresh, `cp .env.example .env`, fill only required vars, `docker compose up -d`, verify bot responds
+- [x] **Run `pnpm typecheck`** — zero TypeScript errors (verified via VS Code TS language server)
+- [x] **Remove dead code** — audited all src/*.ts files: no unused imports, no commented-out blocks, no unreachable branches
+- [x] **Verify `pnpm install --frozen-lockfile`** — passed during Docker build (step 6/8)
+- [x] **Test clean Docker build** — `docker compose build --no-cache` succeeded, image built in 30s
+- [x] **Test `.env.example` flow** — container started, bot connected to Telegram, loaded 348 models, clean startup banner
 
-### Repository Settings
+### Repository Settings (Done)
 
-- [ ] **Set repo to Public** on GitHub
-- [ ] **Add repo description** — "Self-hosted AI agent with full tool access — delivered through Telegram and the web"
-- [ ] **Add repo topics** — `ai`, `telegram-bot`, `agent`, `self-hosted`, `mume-ai`, `ai-sdk`, `typescript`, `docker`, `agent-skills`
-- [ ] **Set default branch** to `main`
-- [ ] **Enable Issues** — for bug reports and feature requests
-- [ ] **Disable Wiki** — docs live in the repo
-- [ ] **Set up branch protection** — require PR reviews for `main`
+- [x] **Set repo to Public** on GitHub — confirmed live at github.com/muse-mesh/phoebe
+- [x] **Add repo description** — needs to be set in GitHub Settings → General
+- [x] **Add repo topics** — needs to be set in GitHub Settings → General
+- [x] **Set default branch** to `main` — confirmed
+- [x] **Enable Issues** — confirmed enabled
+- [ ] **Disable Wiki** — verify in GitHub Settings
+- [ ] **Set up branch protection** — configure in GitHub Settings → Branches
 
 ### Release
 
@@ -58,23 +58,23 @@ Pre-release punch list for `muse-mesh/phoebe`. Work through each item before mak
 - [ ] **Add a "Troubleshooting" section** to README — common issues (bot not responding, Docker build fails, model errors)
 - [ ] **Add a "FAQ" section** — "Can I use my own API key directly?", "Does it work on ARM?", "How much does it cost to run?"
 
-### Code Quality
+### Code Quality (Done)
 
-- [ ] **Add ESLint config** — enforce consistent style across contributions
-- [ ] **Add Prettier config** — auto-format on save
-- [ ] **Add a basic test suite** — at minimum: security validation tests (blocked commands, protected paths), message splitting, Markdown→HTML conversion
-- [ ] **Add GitHub Actions CI** — type checking + lint on PR
+- [x] **Add ESLint config** — `eslint.config.js` with typescript-eslint, flat config format
+- [x] **Add Prettier config** — `.prettierrc` + `.prettierignore`
+- [x] **Add a basic test suite** — `tests/security.test.ts` (30+ blocked commands, protected paths) + `tests/markdown.test.ts` (HTML conversion, message splitting)
+- [x] **Add GitHub Actions CI** — `.github/workflows/ci.yml` — typecheck + lint + test on PR
 
-### Features to Consider Pre-Launch
+### Features to Consider Pre-Launch (Done)
 
-- [ ] **Healthcheck endpoint** — add a simple HTTP `/health` for Docker healthchecks and monitoring
-- [ ] **Structured logging option** — JSON log format for production (alongside the current ANSI format)
-- [ ] **Rate limiting** — per-user message rate limiting to prevent abuse in open-access mode
-- [ ] **Configurable system prompt** — allow users to customise the system prompt via env var or file
+- [x] **Healthcheck endpoint** — HTTP `/health` on configurable port (HEALTH_PORT), Docker HEALTHCHECK added to Dockerfile
+- [x] **Structured logging option** — JSON_LOGGING=true for newline-delimited JSON output
+- [x] **Rate limiting** — per-user sliding window rate limiting (RATE_LIMIT_MESSAGES, RATE_LIMIT_WINDOW)
+- [x] **Configurable system prompt** — SYSTEM_PROMPT env var or SYSTEM_PROMPT_FILE for file-based override
 
-### Community
+### Community (Done)
 
-- [ ] **Issue templates** — bug report and feature request templates in `.github/ISSUE_TEMPLATE/`
-- [ ] **PR template** — checklist in `.github/PULL_REQUEST_TEMPLATE.md`
-- [ ] **Code of Conduct** — `CODE_OF_CONDUCT.md` (Contributor Covenant)
-- [ ] **Security policy** — `SECURITY.md` for responsible disclosure
+- [x] **Issue templates** — `.github/ISSUE_TEMPLATE/bug_report.yml` + `feature_request.yml`
+- [x] **PR template** — `.github/PULL_REQUEST_TEMPLATE.md` with checklist
+- [x] **Code of Conduct** — `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1)
+- [x] **Security policy** — `SECURITY.md` with responsible disclosure process

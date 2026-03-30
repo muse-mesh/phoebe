@@ -13,6 +13,8 @@ import {
   ALLOWED_IDS,
   OLLAMA_BASE_URL,
   isOllamaEnabled,
+  LMSTUDIO_BASE_URL,
+  isLMStudioEnabled,
 } from "../config.js";
 import { trackUser } from "../persistence/index.js";
 import log from "../logger.js";
@@ -20,6 +22,7 @@ import log from "../logger.js";
 // ── AI Provider ──────────────────────────────────────────────────────────────
 
 const OLLAMA_PREFIX = "ollama/";
+const LMSTUDIO_PREFIX = "lmstudio/";
 
 export const mumeProvider = createOpenAICompatible({
   name: "gateway",
@@ -39,6 +42,13 @@ export const ollamaProvider = isOllamaEnabled()
     })
   : null;
 
+export const lmstudioProvider = isLMStudioEnabled()
+  ? createOpenAICompatible({
+      name: "lmstudio",
+      baseURL: LMSTUDIO_BASE_URL.replace(/\/+$/, "") + "/v1",
+    })
+  : null;
+
 /** Check whether a model ID targets Ollama (prefixed with "ollama/"). */
 export function isOllamaModel(modelId: string): boolean {
   return modelId.startsWith(OLLAMA_PREFIX);
@@ -49,9 +59,20 @@ export function ollamaModelName(modelId: string): string {
   return modelId.slice(OLLAMA_PREFIX.length);
 }
 
+/** Check whether a model ID targets LM Studio (prefixed with "lmstudio/"). */
+export function isLMStudioModel(modelId: string): boolean {
+  return modelId.startsWith(LMSTUDIO_PREFIX);
+}
+
+/** Strip the "lmstudio/" prefix to get the local LM Studio model name. */
+export function lmstudioModelName(modelId: string): string {
+  return modelId.slice(LMSTUDIO_PREFIX.length);
+}
+
 /**
  * Resolve a model ID to the correct AI SDK LanguageModel instance.
  * Ollama models (prefixed "ollama/") route to the local Ollama server.
+ * LM Studio models (prefixed "lmstudio/") route to the local LM Studio server.
  * All other models route through Mume AI with provider-ordering hints.
  */
 export function resolveProvider(modelId: string): LanguageModel {
@@ -63,6 +84,15 @@ export function resolveProvider(modelId: string): LanguageModel {
     }
     // Use the OpenAI-compatible provider pointing at Ollama's /v1 endpoint
     return ollamaProvider.chatModel(ollamaModelName(modelId));
+  }
+
+  if (isLMStudioModel(modelId)) {
+    if (!lmstudioProvider) {
+      throw new Error(
+        "LM Studio model requested but LMSTUDIO_BASE_URL is not configured",
+      );
+    }
+    return lmstudioProvider.chatModel(lmstudioModelName(modelId));
   }
 
   // Route via gateway
