@@ -3,9 +3,8 @@
 
 import fs from "fs/promises";
 import { InlineKeyboard } from "grammy";
-import { DEFAULT_MODEL, MAX_STEPS, OWNER_ID, OR_API_KEY } from "../config.js";
+import { MAX_STEPS, OWNER_ID, OR_API_KEY } from "../config.js";
 import {
-  trackUser,
   getChatModel,
   chatModels,
   saveChatModels,
@@ -449,7 +448,7 @@ export function registerCommands() {
     }
 
     let page: number;
-    let options: { filter?: string; ollamaOnly?: boolean; lmstudioOnly?: boolean } = {};
+    const options: { filter?: string; ollamaOnly?: boolean; lmstudioOnly?: boolean } = {};
 
     if (data.startsWith("mo:")) {
       page = parseInt(data.slice(3));

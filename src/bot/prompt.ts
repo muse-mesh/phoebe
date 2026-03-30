@@ -1,8 +1,29 @@
 // ── System Prompt ────────────────────────────────────────────────────────────
 
+import { readFileSync } from "fs";
 import { getSkillCount } from "../tools.js";
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_FILE } from "../config.js";
+
+/**
+ * Load a custom system prompt if configured via SYSTEM_PROMPT or SYSTEM_PROMPT_FILE.
+ * Returns null if neither is set.
+ */
+function loadCustomPrompt(): string | null {
+  if (SYSTEM_PROMPT) return SYSTEM_PROMPT;
+  if (SYSTEM_PROMPT_FILE) {
+    try {
+      return readFileSync(SYSTEM_PROMPT_FILE, "utf-8").trim();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 export function buildPrompt(userName: string, sessionTitle?: string): string {
+  const custom = loadCustomPrompt();
+  if (custom) return custom;
+
   const greeting =
     userName !== "User" ? ` You are chatting with ${userName}.` : "";
   const skillCount = getSkillCount();

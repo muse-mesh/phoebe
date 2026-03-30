@@ -54,6 +54,55 @@ interface ModelCatalog {
   models: AIModel[];
 }
 
+/** Raw model entry from the Mume AI / OpenRouter catalog API. */
+interface CatalogModelRaw {
+  id: string;
+  name: string;
+  created?: number;
+  description?: string;
+  context_length?: number | null;
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    image?: string;
+    request?: string;
+  };
+  architecture?: {
+    input_modalities?: string[];
+    output_modalities?: string[];
+    tokenizer?: string;
+    instruct_type?: string | null;
+  };
+  supported_parameters?: string[];
+  top_provider?: {
+    context_length?: number | null;
+    max_completion_tokens?: number | null;
+    is_moderated?: boolean;
+  };
+}
+
+/** Raw model entry from the Ollama /api/tags endpoint. */
+interface OllamaModelRaw {
+  name?: string;
+  model?: string;
+  size?: number;
+  modified_at?: string;
+  details?: {
+    parameter_size?: string;
+    quantization_level?: string;
+    family?: string;
+    families?: string[];
+    format?: string;
+  };
+}
+
+/** Raw model entry from LM Studio (OpenAI-compatible). */
+interface LMStudioModelRaw {
+  id?: string;
+  model?: string;
+  created?: number;
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 let catalog: ModelCatalog | null = null;
@@ -200,9 +249,9 @@ export async function refreshModelCatalog(): Promise<number> {
     );
   }
 
-  const data = (await res.json()) as { data: any[] };
+  const data = (await res.json()) as { data: CatalogModelRaw[] };
 
-  const models: AIModel[] = (data.data ?? []).map((m: any) => ({
+  const models: AIModel[] = (data.data ?? []).map((m) => ({
     id: m.id,
     name: m.name,
     created: m.created ?? 0,
@@ -256,9 +305,9 @@ export async function refreshOllamaModels(): Promise<number> {
     throw new Error(`Ollama API error ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = (await res.json()) as { models?: any[] };
+  const data = (await res.json()) as { models?: OllamaModelRaw[] };
 
-  const models: AIModel[] = (data.models ?? []).map((m: any) => {
+  const models: AIModel[] = (data.models ?? []).map((m) => {
     const sizeGB = m.size ? (m.size / 1_073_741_824).toFixed(1) : "?";
     const paramCount = m.details?.parameter_size ?? "";
     const quant = m.details?.quantization_level ?? "";
@@ -328,7 +377,7 @@ export async function refreshLMStudioModels(): Promise<number> {
   const raw = await res.json();
   // LM Studio returns OpenAI-compatible format: { data: [...] }
   // but also accept top-level array just in case
-  const rawModels: any[] = Array.isArray(raw)
+  const rawModels: LMStudioModelRaw[] = Array.isArray(raw)
     ? raw
     : Array.isArray(raw.data)
       ? raw.data
@@ -336,7 +385,7 @@ export async function refreshLMStudioModels(): Promise<number> {
 
   log.info("models", `LM Studio returned ${rawModels.length} model entries`);
 
-  const models: AIModel[] = rawModels.map((m: any) => {
+  const models: AIModel[] = rawModels.map((m) => {
     const modelId = m.id ?? m.model ?? "unknown";
     return {
       id: `lmstudio/${modelId}`,

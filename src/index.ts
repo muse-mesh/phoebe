@@ -2,6 +2,7 @@
 // Entry point. Loads env, initialises persistence + skills, starts bot + web.
 
 import "dotenv/config";
+import { createServer } from "http";
 import log from "./logger.js";
 
 // Global error handlers — prevent silent crashes
@@ -23,6 +24,7 @@ import {
   isOllamaEnabled,
   LMSTUDIO_BASE_URL,
   isLMStudioEnabled,
+  HEALTH_PORT,
 } from "./config.js";
 import {
   ensureDataDir,
@@ -47,6 +49,26 @@ async function main(): Promise<void> {
   // Discover skills
   log.info("phoebe", "discovering skills…");
   await discoverSkills();
+
+  // Start healthcheck HTTP server
+  const healthServer = createServer((req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          uptime: Math.floor(process.uptime()),
+          version: "2.0.0",
+        }),
+      );
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  healthServer.listen(HEALTH_PORT, () => {
+    log.info("phoebe", `healthcheck listening on :${HEALTH_PORT}/health`);
+  });
 
   // Start Telegram bot
   if (BOT_TOKEN) {

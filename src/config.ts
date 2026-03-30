@@ -37,3 +37,27 @@ export const ALLOWED_IDS: number[] = process.env.ALLOWED_IDS
 
 export const SKILLS_DIR =
   process.env.SKILLS_DIR || path.resolve(DATA_DIR, "..", "skills");
+
+// ── Healthcheck ──────────────────────────────────────────────────────────────
+
+export const HEALTH_PORT = parseInt(process.env.HEALTH_PORT ?? "8080", 10);
+
+// ── Logging ──────────────────────────────────────────────────────────────────
+
+export const JSON_LOGGING = process.env.JSON_LOGGING === "true";
+
+// ── Rate Limiting ────────────────────────────────────────────────────────────
+
+export const RATE_LIMIT_MESSAGES = parseInt(
+  process.env.RATE_LIMIT_MESSAGES ?? "0",
+  10,
+);
+export const RATE_LIMIT_WINDOW_MS = parseInt(
+  process.env.RATE_LIMIT_WINDOW ?? "60000",
+  10,
+);
+
+// ── Custom System Prompt ─────────────────────────────────────────────────────
+
+export const SYSTEM_PROMPT_FILE = process.env.SYSTEM_PROMPT_FILE ?? "";
+export const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT ?? "";
