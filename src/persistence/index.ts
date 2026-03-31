@@ -53,6 +53,8 @@ export {
   sessionSkillsPath,
   ensureSessionSkillsDir,
   saveAllSessionIndices,
+  getSessionPrompt,
+  setSessionPrompt,
 } from "./sessions.js";
 export type { Session, SessionIndex } from "./sessions.js";
 

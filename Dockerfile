@@ -18,12 +18,13 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Persistent volumes for data and skills
-RUN mkdir -p /app/data /app/skills
+# Persistent volumes for data, skills, and workspace
+RUN mkdir -p /app/data /app/skills /app/workspace
 
 ENV NODE_ENV=production
 ENV DATA_DIR=/app/data
 ENV SKILLS_DIR=/app/skills
+ENV WORKSPACE_DIR=/app/workspace
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1

@@ -191,32 +191,24 @@ export async function sendChunked(
 ): Promise<void> {
   if (!text) return;
 
-  // Convert markdown to Telegram HTML
-  const html = markdownToTelegramHtml(text);
-
-  // Send a single chunk with HTML
-  const sendOne = async (chunk: string, htmlChunk: string) => {
-    try {
-      await ctx.reply(htmlChunk, { parse_mode: "HTML" });
-    } catch {
-      // Fallback to plain text if HTML parsing fails
-      await ctx.reply(chunk).catch((e) => {
-        log.error("bot", "send chunk failed", { err: (e as Error).message });
-      });
-    }
+  // Send a single chunk as plain text
+  const sendOne = async (chunk: string) => {
+    await ctx.reply(chunk).catch((e) => {
+      log.error("bot", "send chunk failed", { err: (e as Error).message });
+    });
   };
 
   // If it fits in one message, send directly
-  if (text.length <= TELEGRAM_LIMIT && html.length <= TELEGRAM_LIMIT) {
-    await sendOne(text, html);
+  if (text.length <= TELEGRAM_LIMIT) {
+    await sendOne(text);
     return;
   }
 
-  // Smart splitting on the plain text, then convert each chunk
+  // Split long text at natural boundaries
   let remaining = text;
   while (remaining.length > 0) {
     if (remaining.length <= TELEGRAM_LIMIT) {
-      await sendOne(remaining, markdownToTelegramHtml(remaining));
+      await sendOne(remaining);
       break;
     }
 
@@ -247,7 +239,7 @@ export async function sendChunked(
     const chunk = remaining.slice(0, splitAt);
     remaining = remaining.slice(splitAt);
 
-    await sendOne(chunk, markdownToTelegramHtml(chunk));
+    await sendOne(chunk);
   }
 }
 

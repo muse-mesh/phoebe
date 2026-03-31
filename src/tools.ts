@@ -1,14 +1,14 @@
 // ── Tools ────────────────────────────────────────────────────────────────────
-// All tools the model can use: bash, readFile, writeFile, and Agent Skills.
+// All tools the model can use: bash and Agent Skills.
 
-import { execFile, execSync } from "child_process";
+import { spawn, execSync } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import { tool } from "ai";
 import { z } from "zod";
 import { SKILLS_DIR } from "./config.js";
 import log from "./logger.js";
-import { validateBashCommand, validateFilePath } from "./security.js";
+import { validateBashCommand } from "./security.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ const BASH_TIMEOUT = 20 * 60 * 1000; // 20 minutes per command
 const BG_TIMEOUT = 10_000; // 10s to capture PID from background command
 const MAX_OUTPUT = 50_000;
 const HOME = process.env.HOME ?? "/home/phoebe";
+const WORKSPACE = process.env.WORKSPACE_DIR ?? "/app/workspace";
 const GLOBAL_SKILLS_DIR = path.join(HOME, ".agents", "skills");
 
 /** Detect if a command ends with & (background operator, not &&). */
@@ -72,34 +73,66 @@ function execBash(
   opts: { timeout?: number; cwd?: string } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
-    execFile(
-      "bash",
-      ["-lc", command],
-      {
-        timeout: opts.timeout ?? BASH_TIMEOUT,
-        maxBuffer: 10 * 1024 * 1024,
-        cwd: opts.cwd ?? HOME,
-        env: {
-          ...process.env,
-          TERM: "dumb",
-          LANG: "en_US.UTF-8",
-          DEBIAN_FRONTEND: "noninteractive",
-          GIT_TERMINAL_PROMPT: "0",
-        },
+    let stdout = "";
+    let stderr = "";
+    let resolved = false;
+    const timeoutMs = opts.timeout ?? BASH_TIMEOUT;
+
+    const child = spawn("bash", ["-lc", command], {
+      cwd: opts.cwd ?? WORKSPACE,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        TERM: "dumb",
+        LANG: "en_US.UTF-8",
+        DEBIAN_FRONTEND: "noninteractive",
+        GIT_TERMINAL_PROMPT: "0",
       },
-      (error, stdout, stderr) => {
-        const code = error
-          ? typeof error.code === "number"
-            ? error.code
-            : 1
-          : 0;
+    });
+
+    // Close stdin immediately so background children don't inherit it
+    child.stdin.end();
+
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString();
+    });
+
+    function finish(code: number) {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      // Small delay to drain any remaining buffered pipe data
+      setTimeout(() => {
         resolve({
-          stdout: truncate(stdout ?? "", MAX_OUTPUT),
-          stderr: truncate(stderr ?? "", MAX_OUTPUT),
+          stdout: truncate(stdout, MAX_OUTPUT),
+          stderr: truncate(stderr, MAX_OUTPUT),
           exitCode: code,
         });
-      },
-    );
+      }, 50);
+    }
+
+    // Resolve on 'exit' — fires when bash exits, even if backgrounded
+    // children still hold the pipes open.  This is the key difference
+    // from execFile, which waits for all pipes to close first.
+    child.on("exit", (code) => {
+      finish(code ?? 0);
+    });
+
+    // Timeout — kill bash if it takes too long
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        child.kill("SIGKILL");
+        resolved = true;
+        resolve({
+          stdout: truncate(stdout, MAX_OUTPUT),
+          stderr: truncate(stderr, MAX_OUTPUT) + "\n(timed out)",
+          exitCode: 124,
+        });
+      }
+    }, timeoutMs);
   });
 }
 
@@ -260,89 +293,6 @@ export function buildTools() {
         Date.now() - t0,
       );
       return output || "(no output)";
-    },
-  });
-
-  const readFile = tool({
-    description:
-      "Read a file's contents. Use instead of cat for cleaner output.",
-    inputSchema: z.object({
-      filePath: z
-        .string()
-        .describe("File path (absolute or relative to home)."),
-    }),
-    execute: async ({ filePath }) => {
-      if (!filePath) return "Error: no path provided";
-      const resolved = path.isAbsolute(filePath)
-        ? filePath
-        : path.resolve(HOME, filePath);
-
-      // Security check
-      const check = validateFilePath(resolved, "read");
-      if (!check.allowed) {
-        log.warn("security", `readFile blocked`, {
-          reason: check.reason,
-          path: resolved,
-        });
-        return `⛔ Security: ${check.reason}`;
-      }
-
-      notifyToolAction("readFile", resolved);
-      log.toolCall("readFile", { filePath: resolved });
-      try {
-        const t0 = Date.now();
-        const content = await fs.readFile(resolved, "utf-8");
-        log.toolResult("readFile", "ok", content, Date.now() - t0);
-        return truncate(content, MAX_OUTPUT);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return `Error reading ${resolved}: ${msg}`;
-      }
-    },
-  });
-
-  const writeFile = tool({
-    description:
-      "Write content to a file. Creates parent directories if needed.",
-    inputSchema: z.object({
-      filePath: z
-        .string()
-        .describe("File path (absolute or relative to home)."),
-      content: z.string().describe("Content to write."),
-    }),
-    execute: async ({ filePath, content }) => {
-      if (!filePath) return "Error: no path provided";
-      const resolved = path.isAbsolute(filePath)
-        ? filePath
-        : path.resolve(HOME, filePath);
-
-      // Security check
-      const check = validateFilePath(resolved, "write");
-      if (!check.allowed) {
-        log.warn("security", `writeFile blocked`, {
-          reason: check.reason,
-          path: resolved,
-        });
-        return `⛔ Security: ${check.reason}`;
-      }
-
-      notifyToolAction("writeFile", `${resolved} (${content.length} chars)`);
-      log.toolCall("writeFile", { filePath: resolved, chars: content.length });
-      try {
-        const t0 = Date.now();
-        await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await fs.writeFile(resolved, content, "utf-8");
-        log.toolResult(
-          "writeFile",
-          "ok",
-          `Wrote ${content.length} chars to ${resolved}`,
-          Date.now() - t0,
-        );
-        return `Wrote ${content.length} chars to ${resolved}`;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return `Error writing ${resolved}: ${msg}`;
-      }
     },
   });
 
@@ -509,8 +459,6 @@ export function buildTools() {
 
   return {
     bash,
-    readFile,
-    writeFile,
     list_skills,
     activate_skill,
     search_skills,

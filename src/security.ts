@@ -68,15 +68,15 @@ const BLOCKED_COMMANDS: [RegExp, string][] = [
   [/\buseradd\b/, "user creation"],
   [/\bvisudo\b/, "sudoers modification"],
 
-  // Network attacks / exfiltration
+  // Network attacks / exfiltration / binding servers
   [/\bnc\s+-[a-zA-Z]*l/i, "netcat listener (reverse shell)"],
   [/\bncat\s+-[a-zA-Z]*l/i, "ncat listener"],
+  [/\bsocat\b.*\blisten\b/i, "socat listener"],
   [/\b(curl|wget)\s+.*\|\s*(ba)?sh\b/i, "pipe remote script to shell"],
   [
     /\b(curl|wget)\s+.*--output\s*-\s*\|\s*(ba)?sh\b/i,
     "pipe remote script to shell",
   ],
-
   // Credential / secret exfiltration
   [/\bcat\s+.*\.env\b/i, "reading env secrets"],
   [/\bcat\s+.*\/etc\/shadow\b/i, "reading shadow file"],

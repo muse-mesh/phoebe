@@ -113,6 +113,7 @@ export async function handleAIMessage(
       abortSignal: abortController.signal,
       sessionSkillsDir: sessionSkillsPath(sessionId),
       sessionTitle: session.title,
+      sessionPrompt: session.systemPrompt,
     });
 
     // Persist response messages

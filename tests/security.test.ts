@@ -40,6 +40,7 @@ describe("validateBashCommand", () => {
       ["dd if=/dev/zero of=/dev/sda", "raw disk write"],
       ["useradd hacker", "user creation"],
       ["usermod -aG sudo user", "user modification"],
+      ["socat TCP-LISTEN:4444 -", "socat listener"],
     ];
 
     for (const [cmd, reason] of blocked) {

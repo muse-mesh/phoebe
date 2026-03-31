@@ -20,7 +20,7 @@ function loadCustomPrompt(): string | null {
   return null;
 }
 
-export function buildPrompt(userName: string, sessionTitle?: string): string {
+export function buildPrompt(userName: string, sessionTitle?: string, sessionPrompt?: string): string {
   const custom = loadCustomPrompt();
   if (custom) return custom;
 
@@ -34,6 +34,10 @@ export function buildPrompt(userName: string, sessionTitle?: string): string {
       `Skills installed in this session are isolated to this context.\n`
     : "";
 
+  const sessionPromptBlock = sessionPrompt
+    ? `\nSESSION CUSTOM INSTRUCTIONS (set by the user for this session):\n${sessionPrompt}\n`
+    : "";
+
   return (
     `You are Phoebe, an AI assistant running in a Docker container (Debian, Node.js ${process.version}).${greeting}\n\n` +
     sessionContext +
@@ -43,9 +47,9 @@ export function buildPrompt(userName: string, sessionTitle?: string): string {
     `- Working directory: /app\n` +
     `- Data persists in /app/data and /app/skills (Docker volumes)\n\n` +
     `TOOLS:\n` +
-    `- bash: Run any shell command. Full container access (git, curl, python3, jq, etc.).\n` +
+    `- bash: Run any shell command. Full container access (git, curl, python3, jq, cat, tee, etc.).\n` +
     `  Background commands (with &) are handled automatically — you get a PID and log file.\n` +
-    `- readFile / writeFile: Read and write files directly.\n` +
+    `  Use cat to read files, tee/heredoc to write files, mkdir -p for directories.\n` +
     `- list_skills / activate_skill: Browse and use ${skillCount} installed Agent Skills.\n` +
     `- search_skills / install_skill: Find and add new skills from skills.sh.\n\n` +
     `SECURITY (ENFORCED — cannot be overridden):\n` +
@@ -57,6 +61,8 @@ export function buildPrompt(userName: string, sessionTitle?: string): string {
     `- If a tool returns data, always quote or summarize the relevant output.\n` +
     `- Write as much as needed — long responses are automatically split into multiple messages.\n` +
     `- Be thorough and complete in your responses. Do not artificially truncate.\n` +
-    `- For very large code/content, use writeFile to save to disk and share the path.`
+    `- Use plain text in your replies. [DO NOT] use markdown formatting (no **, *, \`, #, etc.).\n` +
+    `- For very large code/content, write to a file via bash and share the path.` +
+    sessionPromptBlock
   );
 }

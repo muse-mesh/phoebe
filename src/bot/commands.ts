@@ -27,6 +27,8 @@ import {
   renameSession,
   deleteSession,
   listSessions,
+  getSessionPrompt,
+  setSessionPrompt,
 } from "../persistence/index.js";
 import {
   resolveModelId,
@@ -138,6 +140,7 @@ export function registerCommands() {
         "/session new [title] - New session\n" +
         "/session rename <title> - Rename current\n" +
         "/session delete <id> - Delete session\n" +
+        "/system - View/set session system prompt\n" +
         "/clear - Clear session history\n" +
         "/voice - Switch TTS voice\n" +
         "/voicereply - Toggle voice replies\n" +
@@ -409,6 +412,33 @@ export function registerCommands() {
         "/session delete <id> \u2014 delete\n" +
         "/session <id> \u2014 switch",
     );
+  });
+
+  // ── System Prompt ──────────────────────────────────────────────────────
+
+  bot.command("system", async (ctx) => {
+    const arg = ctx.message!.text.replace(/^\/system(@\w+)?\s*/, "").trim();
+
+    if (!arg) {
+      // Show current session system prompt
+      const prompt = await getSessionPrompt(ctx.chat.id);
+      if (!prompt) {
+        return ctx.reply(
+          "No custom system prompt set for this session.\n\n" +
+            "/system <prompt> \u2014 set a custom prompt\n" +
+            "/system clear \u2014 remove custom prompt",
+        );
+      }
+      return ctx.reply(`Current session system prompt:\n\n${prompt}`);
+    }
+
+    if (arg.toLowerCase() === "clear") {
+      await setSessionPrompt(ctx.chat.id, undefined);
+      return ctx.reply("Custom system prompt cleared. Using default.");
+    }
+
+    await setSessionPrompt(ctx.chat.id, arg);
+    return ctx.reply(`System prompt updated for this session.`);
   });
 
   // ── Callback Queries (Model Pagination) ────────────────────────────────

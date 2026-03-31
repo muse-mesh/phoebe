@@ -17,6 +17,7 @@ export interface Session {
   title: string;
   createdAt: string;
   updatedAt: string;
+  systemPrompt?: string;
 }
 
 export interface SessionIndex {
@@ -280,6 +281,27 @@ export function sessionSkillsPath(sessionId: string): string {
 /** Ensure the session skills directory exists. */
 export async function ensureSessionSkillsDir(sessionId: string): Promise<void> {
   await fs.mkdir(sessionSkillsPath(sessionId), { recursive: true });
+}
+
+/** Get the custom system prompt for the active session, if any. */
+export async function getSessionPrompt(
+  chatId: number,
+): Promise<string | undefined> {
+  const session = await getActiveSession(chatId);
+  return session.systemPrompt;
+}
+
+/** Set or clear the custom system prompt for the active session. */
+export async function setSessionPrompt(
+  chatId: number,
+  prompt: string | undefined,
+): Promise<void> {
+  const index = await getSessionIndex(chatId);
+  const session = index.sessions.find((s) => s.id === index.activeId);
+  if (!session) return;
+  session.systemPrompt = prompt;
+  session.updatedAt = new Date().toISOString();
+  await saveSessionIndex(chatId);
 }
 
 // ── Bulk Persistence ─────────────────────────────────────────────────────────

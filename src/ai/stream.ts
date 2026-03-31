@@ -18,6 +18,7 @@ import log from "../logger.js";
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const STREAM_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per request
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 min with no progress → abort
 const RESPONSE_COLLECT_TIMEOUT_MS = 30_000; // 30s max to collect response after stream ends
 
 // ── Tools ────────────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ export async function runAIStream(opts: {
   abortSignal?: AbortSignal;
   sessionSkillsDir?: string;
   sessionTitle?: string;
+  sessionPrompt?: string;
 }): Promise<StreamResult> {
   const { channel, modelId, userName, contextMessages } = opts;
 
@@ -74,7 +76,7 @@ export async function runAIStream(opts: {
 
   let toolStepCount = 0;
 
-  const systemPrompt = buildPrompt(userName, opts.sessionTitle);
+  const systemPrompt = buildPrompt(userName, opts.sessionTitle, opts.sessionPrompt);
   let sentTextLength = 0;
 
   // Wire up tool action notifications — tools.ts execute() calls this callback
@@ -95,6 +97,19 @@ export async function runAIStream(opts: {
     });
     abortController.abort();
   }, STREAM_TIMEOUT_MS);
+
+  // Idle timeout — abort if no progress for IDLE_TIMEOUT_MS
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  function resetIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      log.warn("ai", "idle timeout — no progress, aborting stream", {
+        after: `${IDLE_TIMEOUT_MS / 1000}s`,
+      });
+      abortController.abort();
+    }, IDLE_TIMEOUT_MS);
+  }
+  resetIdleTimer();
 
   // Chain external abort signal (e.g. from per-chat cancellation)
   if (opts.abortSignal) {
@@ -122,6 +137,7 @@ export async function runAIStream(opts: {
       abortSignal: abortController.signal,
       stopWhen: stepCountIs(MAX_STEPS),
       onStepFinish: (step) => {
+        resetIdleTimer();
         try {
           const toolCalls = step.toolCalls ?? [];
           const stepText = (step.text ?? "").trim();
@@ -152,7 +168,12 @@ export async function runAIStream(opts: {
 
             // Log each tool call
             for (const tc of toolCalls) {
-              log.toolCall(tc.toolName, (tc.input ?? {}) as Record<string, unknown>);
+              const rawInput = tc.input ?? {};
+              const args: Record<string, unknown> =
+                typeof rawInput === "object" && rawInput !== null && !Array.isArray(rawInput)
+                  ? (rawInput as Record<string, unknown>)
+                  : { input: rawInput };
+              log.toolCall(tc.toolName, args);
             }
 
             // Send tool results to user so they see output even if
@@ -184,6 +205,7 @@ export async function runAIStream(opts: {
     });
   } catch (initErr) {
     clearTimeout(timeoutId);
+    if (idleTimer) clearTimeout(idleTimer);
     clearInterval(typingInterval);
     setToolActionCallback(null);
     setSessionSkillsDir(null);
@@ -196,20 +218,75 @@ export async function runAIStream(opts: {
     };
   }
 
-  // Collect streamed text — log every chunk in real time
+  // Consume fullStream for complete visibility into all streaming events
   let fullText = "";
   let timedOut = false;
   let streamStarted = false;
+  let currentStep = 0;
   try {
-    for await (const chunk of result.textStream) {
-      if (!streamStarted) {
-        // Print header before first chunk so we know streaming has begun
-        log.info("ai", "streaming response…");
-        streamStarted = true;
+    for await (const part of result.fullStream) {
+      resetIdleTimer();
+
+      switch (part.type) {
+        case "start-step":
+          currentStep++;
+          log.info("ai", `stream step ${currentStep} started`);
+          break;
+
+        case "text-delta":
+          if (!streamStarted) {
+            log.info("ai", "streaming response…");
+            streamStarted = true;
+          }
+          fullText += part.text;
+          log.streamChunk(part.text);
+          channel.onStreamChunk(part.text);
+          break;
+
+        case "tool-input-start":
+          log.info("ai", `tool input streaming: ${part.toolName}`);
+          break;
+
+        case "tool-input-delta":
+          // Log streaming tool input chunks so we can watch in real time
+          log.streamChunk(part.delta);
+          break;
+
+        case "tool-call":
+          log.info("ai", `tool call ready: ${part.toolName}`);
+          break;
+
+        case "tool-result":
+          log.info("ai", `tool result: ${part.toolName}`);
+          break;
+
+        case "tool-error":
+          log.error("ai", `tool error: ${part.toolName}`, {}, (part as Record<string, unknown>).error);
+          break;
+
+        case "finish-step":
+          log.info("ai", `stream step ${currentStep} finished`, {
+            reason: part.finishReason,
+            inputTokens: part.usage.inputTokens,
+            outputTokens: part.usage.outputTokens,
+          });
+          break;
+
+        case "finish":
+          log.info("ai", "stream finished", {
+            reason: part.finishReason,
+            inputTokens: part.totalUsage.inputTokens,
+            outputTokens: part.totalUsage.outputTokens,
+          });
+          break;
+
+        case "error":
+          log.error("ai", "stream part error", {}, part.error);
+          break;
+
+        default:
+          break;
       }
-      fullText += chunk;
-      log.streamChunk(chunk);
-      channel.onStreamChunk(chunk);
     }
     if (streamStarted) log.streamEnd();
   } catch (err) {
@@ -222,6 +299,7 @@ export async function runAIStream(opts: {
     } else {
       log.error("ai", "stream error", {}, err);
       clearTimeout(timeoutId);
+      if (idleTimer) clearTimeout(idleTimer);
       clearInterval(typingInterval);
       setToolActionCallback(null);
       setSessionSkillsDir(null);
@@ -231,6 +309,7 @@ export async function runAIStream(opts: {
   }
 
   clearTimeout(timeoutId);
+  if (idleTimer) clearTimeout(idleTimer);
   clearInterval(typingInterval);
   setToolActionCallback(null);
   setSessionSkillsDir(null);
